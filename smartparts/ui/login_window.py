@@ -1,8 +1,9 @@
-from PySide6.QtCore import QPointF, QSize, Qt
+from PySide6.QtCore import QPointF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QBrush
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QVBoxLayout, QWidget
 
 from smartparts.theme import CYAN, MINT, WINDOW_HEIGHT, WINDOW_WIDTH
+from smartparts.ui.dashboard_window import DashboardWindow
 from smartparts.ui.icons import IconWidget
 from smartparts.ui.styles import login_stylesheet
 
@@ -10,12 +11,22 @@ from smartparts.ui.styles import login_stylesheet
 class LoginWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
+        self.dashboard_window: DashboardWindow | None = None
         self.setWindowTitle("SmartParts - Вход")
         self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
-        self.setCentralWidget(LoginCanvas())
+        canvas = LoginCanvas()
+        canvas.login_requested.connect(self._open_dashboard)
+        self.setCentralWidget(canvas)
+
+    def _open_dashboard(self) -> None:
+        self.dashboard_window = DashboardWindow()
+        self.dashboard_window.show()
+        self.close()
 
 
 class LoginCanvas(QWidget):
+    login_requested = Signal()
+
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("canvas")
@@ -182,14 +193,14 @@ class LoginCanvas(QWidget):
         group.addWidget(shell)
         return group
 
-    @staticmethod
-    def _login_button() -> QPushButton:
+    def _login_button(self) -> QPushButton:
         button = QPushButton("Вход")
         button.setObjectName("loginButton")
         button.setIcon(IconWidget.to_icon("login", "#E7FFF9", 20))
         button.setIconSize(QSize(20, 20))
         button.setCursor(Qt.PointingHandCursor)
         button.setFixedHeight(54)
+        button.clicked.connect(self.login_requested.emit)
         return button
 
     @staticmethod

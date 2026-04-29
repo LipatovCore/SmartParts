@@ -100,3 +100,142 @@ def login_stylesheet() -> str:
         font-size: 11px;
     }}
     """
+
+
+def dashboard_stylesheet() -> str:
+    return f"""
+    #dashboardCanvas {{
+        background: transparent;
+        font-family: Arial;
+    }}
+    #sidebar {{
+        background: #0B1219;
+        border-right: 1px solid #263948;
+    }}
+    #mainWorkspace {{
+        background: #111A23;
+    }}
+    #brandAccent {{
+        border-radius: 2px;
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {CYAN}, stop:1 {MINT});
+    }}
+    #brandTitle {{
+        color: #F2FAFF;
+        font-size: 28px;
+        font-weight: 700;
+    }}
+    #brandSubtitle,
+    #pageSubtitle,
+    #cardDescription,
+    #summarySubtitle {{
+        color: #8FA8B9;
+    }}
+    #sessionTitle {{
+        color: {CYAN};
+        font-size: 13px;
+        font-weight: 700;
+    }}
+    #sessionCard,
+    #summaryPanel {{
+        background: #0F1B24;
+        border: 1px solid #263948;
+        border-radius: 8px;
+    }}
+    #operatorText,
+    #logoutText,
+    #taskLabel {{
+        color: #DDEAF2;
+        font-weight: 700;
+    }}
+    #logoutButton,
+    #secondaryAction {{
+        background: #132531;
+        border: 1px solid rgba(45, 226, 230, 0.55);
+        border-radius: 6px;
+    }}
+    #logoutButton:hover,
+    #secondaryAction:hover {{
+        background: #173242;
+        border-color: rgba(50, 246, 166, 0.75);
+    }}
+    #pageTitle {{
+        color: #F4FAFF;
+        font-size: 34px;
+        font-weight: 700;
+    }}
+    #quickSearch {{
+        background: #0B141C;
+        border: 1px solid rgba(45, 226, 230, 0.60);
+        border-radius: 6px;
+    }}
+    #searchInput {{
+        color: #DDEAF2;
+        background: transparent;
+        border: none;
+        font-size: 15px;
+        selection-background-color: {CYAN};
+        selection-color: #061116;
+    }}
+    #modeCard {{
+        background: #101B24;
+        border: 1px solid #263948;
+        border-radius: 8px;
+    }}
+    #modeCardPrimary {{
+        background: #101B24;
+        border: 1px solid rgba(45, 226, 230, 0.40);
+        border-radius: 8px;
+    }}
+    #modeCardAccent {{
+        background: #101B24;
+        border: 1px solid rgba(50, 246, 166, 0.40);
+        border-radius: 8px;
+    }}
+    #cardTitle,
+    #summaryTitle {{
+        color: #F4FAFF;
+        font-weight: 700;
+    }}
+    #primaryAction {{
+        color: #061116;
+        font-size: 14px;
+        font-weight: 700;
+        border: 1px solid #A9FFF0;
+        border-radius: 6px;
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {CYAN}, stop:1 {MINT});
+    }}
+    #primaryAction:hover {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5AF7FA, stop:1 #5DFFC0);
+    }}
+    #secondaryAction {{
+        color: #DFFDF5;
+        font-size: 14px;
+        font-weight: 700;
+    }}
+    #taskItem {{
+        background: #111F29;
+        border: 1px solid #263948;
+        border-radius: 5px;
+    }}
+    #taskItemProblem {{
+        background: #2A171B;
+        border: 1px solid {RED};
+        border-radius: 5px;
+    }}
+    #taskCountMint {{
+        color: {MINT};
+        font-size: 18px;
+        font-weight: 700;
+    }}
+    #taskCountCyan {{
+        color: {CYAN};
+        font-size: 18px;
+        font-weight: 700;
+    }}
+    #taskCountRed,
+    #taskProblemLabel {{
+        color: #FF7A85;
+        font-size: 18px;
+        font-weight: 700;
+    }}
+    """
