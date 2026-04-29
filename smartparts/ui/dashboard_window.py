@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence, QLinearGradient, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
@@ -15,14 +15,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from smartparts.session import AppSession
 from smartparts.theme import CYAN, MINT, RED, WINDOW_HEIGHT, WINDOW_WIDTH
 from smartparts.ui.icons import IconWidget
 from smartparts.ui.styles import dashboard_stylesheet
 
 
 class DashboardWindow(QMainWindow):
-    def __init__(self) -> None:
+    logout_requested = Signal()
+
+    def __init__(self, session: AppSession) -> None:
         super().__init__()
+        self.session = session
         self.setWindowTitle("SmartParts - Рабочий стол")
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setMinimumSize(820, 560)
@@ -30,7 +34,9 @@ class DashboardWindow(QMainWindow):
         self._fullscreen_shortcut.activated.connect(self._toggle_fullscreen)
         self._exit_fullscreen_shortcut = QShortcut(QKeySequence("Esc"), self)
         self._exit_fullscreen_shortcut.activated.connect(self._exit_fullscreen)
-        self.setCentralWidget(DashboardCanvas())
+        canvas = DashboardCanvas(session)
+        canvas.logout_requested.connect(self.logout_requested.emit)
+        self.setCentralWidget(canvas)
 
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():
@@ -44,8 +50,11 @@ class DashboardWindow(QMainWindow):
 
 
 class DashboardCanvas(QWidget):
-    def __init__(self) -> None:
+    logout_requested = Signal()
+
+    def __init__(self, session: AppSession) -> None:
         super().__init__()
+        self.session = session
         self.setObjectName("dashboardCanvas")
         self.setStyleSheet(dashboard_stylesheet())
 
@@ -110,7 +119,7 @@ class DashboardCanvas(QWidget):
         card_layout.setContentsMargins(14, 14, 14, 14)
         card_layout.setSpacing(10)
         card_layout.addWidget(IconWidget("user", CYAN, 17))
-        operator = QLabel("operator")
+        operator = QLabel(self.session.operator_name)
         operator.setObjectName("operatorText")
         card_layout.addWidget(operator)
         card_layout.addStretch(1)
@@ -122,6 +131,7 @@ class DashboardCanvas(QWidget):
         logout.setIconSize(QSize(17, 17))
         logout.setCursor(Qt.PointingHandCursor)
         logout.setFixedHeight(42)
+        logout.clicked.connect(self.logout_requested.emit)
         layout.addWidget(logout)
         return panel
 

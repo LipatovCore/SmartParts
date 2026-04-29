@@ -1,17 +1,43 @@
-from PySide6.QtCore import QPointF, QSize, Qt, Signal
+from PySide6.QtCore import QObject, QPointF, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QKeySequence, QLinearGradient, QPainter, QPen, QBrush, QShortcut
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
+from smartparts.services.moysklad import MoySkladAuthError, authenticate
+from smartparts.session import AppSession
 from smartparts.theme import CYAN, MINT, WINDOW_HEIGHT, WINDOW_WIDTH
 from smartparts.ui.dashboard_window import DashboardWindow
 from smartparts.ui.icons import IconWidget
 from smartparts.ui.styles import login_stylesheet
 
 
+class AuthWorker(QObject):
+    succeeded = Signal(object)
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(self, login: str, password: str) -> None:
+        super().__init__()
+        self._login = login
+        self._password = password
+
+    def run(self) -> None:
+        try:
+            self.succeeded.emit(authenticate(self._login, self._password))
+        except MoySkladAuthError as error:
+            self.failed.emit(error.message)
+        except Exception:
+            self.failed.emit("Не удалось выполнить вход. Попробуйте снова.")
+        finally:
+            self.finished.emit()
+
+
 class LoginWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.dashboard_window: DashboardWindow | None = None
+        self.session: AppSession | None = None
+        self._auth_thread: QThread | None = None
+        self._auth_worker: AuthWorker | None = None
         self.setWindowTitle("SmartParts - Вход")
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setMinimumSize(760, 520)
@@ -20,7 +46,8 @@ class LoginWindow(QMainWindow):
         self._exit_fullscreen_shortcut = QShortcut(QKeySequence("Esc"), self)
         self._exit_fullscreen_shortcut.activated.connect(self._exit_fullscreen)
         canvas = LoginCanvas()
-        canvas.login_requested.connect(self._open_dashboard)
+        canvas.login_requested.connect(self._authenticate)
+        self.canvas = canvas
         self.setCentralWidget(canvas)
 
     def _toggle_fullscreen(self) -> None:
@@ -33,14 +60,50 @@ class LoginWindow(QMainWindow):
         if self.isFullScreen():
             self.showNormal()
 
-    def _open_dashboard(self) -> None:
-        self.dashboard_window = DashboardWindow()
+    def _authenticate(self, login: str, password: str) -> None:
+        if self._auth_thread is not None:
+            return
+
+        self.canvas.set_busy(True)
+        self._auth_thread = QThread(self)
+        self._auth_worker = AuthWorker(login, password)
+        self._auth_worker.moveToThread(self._auth_thread)
+        self._auth_thread.started.connect(self._auth_worker.run)
+        self._auth_worker.succeeded.connect(self._open_dashboard)
+        self._auth_worker.failed.connect(self._show_auth_error)
+        self._auth_worker.finished.connect(self._auth_thread.quit)
+        self._auth_worker.finished.connect(self._auth_worker.deleteLater)
+        self._auth_thread.finished.connect(self._auth_thread.deleteLater)
+        self._auth_thread.finished.connect(self._clear_auth_worker)
+        self._auth_thread.start()
+
+    def _show_auth_error(self, message: str) -> None:
+        self.canvas.set_busy(False)
+        self.canvas.show_error(message)
+
+    def _clear_auth_worker(self) -> None:
+        self._auth_thread = None
+        self._auth_worker = None
+
+    def _open_dashboard(self, session: AppSession) -> None:
+        self.session = session
+        self.canvas.set_busy(False)
+        self.canvas.reset()
+        self.dashboard_window = DashboardWindow(session)
+        self.dashboard_window.logout_requested.connect(self._logout)
         self.dashboard_window.show()
-        self.close()
+        self.hide()
+
+    def _logout(self) -> None:
+        self.session = None
+        if self.dashboard_window is not None:
+            self.dashboard_window.close()
+            self.dashboard_window = None
+        self.show()
 
 
 class LoginCanvas(QWidget):
-    login_requested = Signal()
+    login_requested = Signal(str, str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -98,10 +161,12 @@ class LoginCanvas(QWidget):
         form_layout.setSpacing(18)
 
         form_layout.addLayout(self._form_header())
-        form_layout.addWidget(self._error_box())
+        self.error_box, self.error_label = self._error_box()
+        form_layout.addWidget(self.error_box)
         form_layout.addLayout(self._input_group("Логин", "operator", "user", CYAN, "loginInput"))
         form_layout.addLayout(self._input_group("Пароль", "Введите пароль", "lock", CYAN, "passwordInput", password=True))
-        form_layout.addWidget(self._login_button())
+        self.login_button = self._login_button()
+        form_layout.addWidget(self.login_button)
         form_layout.addLayout(self._footer())
 
         return form
@@ -164,7 +229,7 @@ class LoginCanvas(QWidget):
         return header
 
     @staticmethod
-    def _error_box() -> QFrame:
+    def _error_box() -> tuple[QFrame, QLabel]:
         box = QFrame()
         box.setObjectName("errorBox")
         box.setVisible(False)
@@ -176,13 +241,14 @@ class LoginCanvas(QWidget):
 
         text = QLabel("Неверный логин или пароль")
         text.setObjectName("errorText")
+        text.setWordWrap(True)
         row.addWidget(text)
         row.addStretch(1)
 
-        return box
+        return box, text
 
-    @staticmethod
     def _input_group(
+        self,
         label_text: str,
         placeholder: str,
         icon: str,
@@ -212,6 +278,11 @@ class LoginCanvas(QWidget):
         line_edit.setFrame(False)
         if password:
             line_edit.setEchoMode(QLineEdit.Password)
+        line_edit.returnPressed.connect(self._submit)
+        if object_name == "loginInput":
+            self.login_input = line_edit
+        elif object_name == "passwordInput":
+            self.password_input = line_edit
 
         row.addWidget(line_edit, 1)
         group.addWidget(shell)
@@ -224,8 +295,33 @@ class LoginCanvas(QWidget):
         button.setIconSize(QSize(20, 20))
         button.setCursor(Qt.PointingHandCursor)
         button.setFixedHeight(54)
-        button.clicked.connect(self.login_requested.emit)
+        button.clicked.connect(self._submit)
         return button
+
+    def _submit(self) -> None:
+        login = self.login_input.text().strip()
+        password = self.password_input.text()
+        if not login or not password:
+            self.show_error("Введите логин и пароль.")
+            return
+
+        self.error_box.setVisible(False)
+        self.login_requested.emit(login, password)
+
+    def show_error(self, message: str) -> None:
+        self.error_label.setText(message)
+        self.error_box.setVisible(True)
+
+    def set_busy(self, busy: bool) -> None:
+        self.login_input.setEnabled(not busy)
+        self.password_input.setEnabled(not busy)
+        self.login_button.setEnabled(not busy)
+        self.login_button.setText("Подключение..." if busy else "Вход")
+
+    def reset(self) -> None:
+        self.password_input.clear()
+        self.error_box.setVisible(False)
+        self.set_busy(False)
 
     @staticmethod
     def _footer() -> QHBoxLayout:
