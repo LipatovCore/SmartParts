@@ -1,6 +1,6 @@
 from PySide6.QtCore import QPointF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QBrush
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor, QKeySequence, QLinearGradient, QPainter, QPen, QBrush, QShortcut
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from smartparts.theme import CYAN, MINT, WINDOW_HEIGHT, WINDOW_WIDTH
 from smartparts.ui.dashboard_window import DashboardWindow
@@ -13,10 +13,25 @@ class LoginWindow(QMainWindow):
         super().__init__()
         self.dashboard_window: DashboardWindow | None = None
         self.setWindowTitle("SmartParts - Вход")
-        self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.setMinimumSize(760, 520)
+        self._fullscreen_shortcut = QShortcut(QKeySequence("F11"), self)
+        self._fullscreen_shortcut.activated.connect(self._toggle_fullscreen)
+        self._exit_fullscreen_shortcut = QShortcut(QKeySequence("Esc"), self)
+        self._exit_fullscreen_shortcut.activated.connect(self._exit_fullscreen)
         canvas = LoginCanvas()
         canvas.login_requested.connect(self._open_dashboard)
         self.setCentralWidget(canvas)
+
+    def _toggle_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def _exit_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
 
     def _open_dashboard(self) -> None:
         self.dashboard_window = DashboardWindow()
@@ -35,15 +50,20 @@ class LoginCanvas(QWidget):
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(self._build_brand_panel())
-        root.addWidget(self._build_form_zone(), 1)
+        self._brand_panel = self._build_brand_panel()
+        self._form_zone = self._build_form_zone()
+        root.addWidget(self._brand_panel)
+        root.addWidget(self._form_zone, 1)
 
     def _build_brand_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("brandPanel")
-        panel.setFixedWidth(520)
+        panel.setMinimumWidth(300)
+        panel.setMaximumWidth(520)
+        panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
         layout = QVBoxLayout(panel)
+        self._brand_layout = layout
         layout.setContentsMargins(64, 72, 64, 72)
         layout.setSpacing(34)
         layout.setAlignment(Qt.AlignVCenter)
@@ -69,7 +89,9 @@ class LoginCanvas(QWidget):
     def _login_form(self) -> QFrame:
         form = QFrame()
         form.setObjectName("loginCard")
-        form.setFixedWidth(430)
+        form.setMinimumWidth(280)
+        form.setMaximumWidth(430)
+        form.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
 
         form_layout = QVBoxLayout(form)
         form_layout.setContentsMargins(0, 0, 0, 0)
@@ -116,7 +138,9 @@ class LoginCanvas(QWidget):
         for name, width in (("diag1", 360), ("diag2", 250), ("diag3", 340)):
             line = QFrame()
             line.setObjectName(name)
-            line.setFixedSize(width, 2)
+            line.setFixedHeight(2)
+            line.setMaximumWidth(width)
+            line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             diagnostics.addWidget(line)
 
         holder = QWidget()
@@ -233,3 +257,12 @@ class LoginCanvas(QWidget):
         painter.drawLine(84, 716, 1282, 716)
 
         super().paintEvent(event)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API naming
+        width = self.width()
+        compact = width < 1120
+        self._brand_panel.setVisible(width >= 980)
+        self._brand_panel.setMaximumWidth(520 if not compact else 400)
+        self._brand_layout.setContentsMargins(40 if compact else 64, 56 if compact else 72, 40 if compact else 64, 56 if compact else 72)
+        self._form_zone.layout().setContentsMargins(28, 28, 28, 28)
+        super().resizeEvent(event)

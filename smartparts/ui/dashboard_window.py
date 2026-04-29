@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QColor, QLinearGradient, QPainter
+from PySide6.QtGui import QColor, QKeySequence, QLinearGradient, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -23,8 +24,23 @@ class DashboardWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("SmartParts - Рабочий стол")
-        self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.setMinimumSize(820, 560)
+        self._fullscreen_shortcut = QShortcut(QKeySequence("F11"), self)
+        self._fullscreen_shortcut.activated.connect(self._toggle_fullscreen)
+        self._exit_fullscreen_shortcut = QShortcut(QKeySequence("Esc"), self)
+        self._exit_fullscreen_shortcut.activated.connect(self._exit_fullscreen)
         self.setCentralWidget(DashboardCanvas())
+
+    def _toggle_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def _exit_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
 
 
 class DashboardCanvas(QWidget):
@@ -36,15 +52,20 @@ class DashboardCanvas(QWidget):
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(self._sidebar())
-        root.addWidget(self._workspace(), 1)
+        self._sidebar_widget = self._sidebar()
+        self._workspace_widget = self._workspace()
+        root.addWidget(self._sidebar_widget)
+        root.addWidget(self._workspace_widget, 1)
 
     def _sidebar(self) -> QFrame:
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(300)
+        sidebar.setMinimumWidth(240)
+        sidebar.setMaximumWidth(300)
+        sidebar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
         layout = QVBoxLayout(sidebar)
+        self._sidebar_layout = layout
         layout.setContentsMargins(28, 34, 28, 34)
         layout.setSpacing(24)
 
@@ -109,10 +130,17 @@ class DashboardCanvas(QWidget):
         workspace.setObjectName("mainWorkspace")
 
         layout = QVBoxLayout(workspace)
+        self._workspace_layout = layout
         layout.setContentsMargins(38, 34, 38, 34)
         layout.setSpacing(22)
         layout.addWidget(self._header())
-        layout.addWidget(self._body(), 1)
+        scroll = QScrollArea()
+        scroll.setObjectName("workspaceScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(self._body())
+        layout.addWidget(scroll, 1)
         return workspace
 
     def _header(self) -> QFrame:
@@ -130,17 +158,23 @@ class DashboardCanvas(QWidget):
         title.setObjectName("pageTitle")
         subtitle = QLabel("Выберите режим работы или найдите запчасть по артикулу")
         subtitle.setObjectName("pageSubtitle")
+        self._page_subtitle = subtitle
         text_layout.addWidget(title)
         text_layout.addWidget(subtitle)
 
+        self._header_layout = layout
+        self._header_text = text
+        self._search_widget = self._search_box()
         layout.addWidget(text, 1)
-        layout.addWidget(self._search_box())
+        layout.addWidget(self._search_widget)
         return header
 
     def _search_box(self) -> QFrame:
         search = QFrame()
         search.setObjectName("quickSearch")
-        search.setFixedSize(420, 54)
+        search.setMinimumSize(260, 54)
+        search.setMaximumWidth(420)
+        search.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         layout = QHBoxLayout(search)
         layout.setContentsMargins(15, 0, 15, 0)
@@ -183,7 +217,8 @@ class DashboardCanvas(QWidget):
         )
 
         layout.addWidget(grid, 1)
-        layout.addWidget(self._summary_panel())
+        self._summary_widget = self._summary_panel()
+        layout.addWidget(self._summary_widget)
         return body
 
     def _card_row(self, cards: Iterable[tuple[str, str, str, str, str, str, bool]]) -> QHBoxLayout:
@@ -244,7 +279,9 @@ class DashboardCanvas(QWidget):
     def _summary_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("summaryPanel")
-        panel.setFixedWidth(330)
+        panel.setMinimumWidth(280)
+        panel.setMaximumWidth(330)
+        panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(18, 18, 18, 18)
@@ -298,3 +335,20 @@ class DashboardCanvas(QWidget):
         painter.fillRect(self.rect(), background)
 
         super().paintEvent(event)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API naming
+        width = self.width()
+        compact = width < 1180
+        narrow = width < 940
+
+        self._summary_widget.setVisible(not compact)
+        self._sidebar_widget.setMaximumWidth(240 if compact else 300)
+        self._sidebar_widget.setMinimumWidth(210 if narrow else 240)
+        self._sidebar_layout.setContentsMargins(18 if compact else 28, 24 if compact else 34, 18 if compact else 28, 24 if compact else 34)
+        self._search_widget.setMaximumWidth(320 if compact else 420)
+        self._page_subtitle.setVisible(not narrow)
+
+        margin = 22 if compact else 38
+        top_margin = 24 if compact else 34
+        self._workspace_layout.setContentsMargins(margin, top_margin, margin, top_margin)
+        super().resizeEvent(event)
