@@ -119,9 +119,22 @@ class DashboardCanvas(QWidget):
         card_layout.setContentsMargins(14, 14, 14, 14)
         card_layout.setSpacing(10)
         card_layout.addWidget(IconWidget("user", CYAN, 17))
+
+        session_details = QFrame()
+        session_details_layout = QVBoxLayout(session_details)
+        session_details_layout.setContentsMargins(0, 0, 0, 0)
+        session_details_layout.setSpacing(4)
+
         operator = QLabel(self.session.operator_name)
         operator.setObjectName("operatorText")
-        card_layout.addWidget(operator)
+        session_details_layout.addWidget(operator)
+
+        role = QLabel(f"Role: {self.session.system_role or 'unknown'}")
+        role.setObjectName("sessionRoleText")
+        role.setWordWrap(True)
+        session_details_layout.addWidget(role)
+
+        card_layout.addWidget(session_details, 1)
         card_layout.addStretch(1)
         layout.addWidget(card)
 

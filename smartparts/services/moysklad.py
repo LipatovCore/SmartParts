@@ -4,6 +4,7 @@ import json
 import socket
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 
 from smartparts.session import AppSession
 
@@ -11,6 +12,7 @@ from smartparts.session import AppSession
 API_BASE_URL = "https://api.moysklad.ru/api/remap/1.2"
 TOKEN_URL = f"{API_BASE_URL}/security/token"
 EMPLOYEE_CONTEXT_URL = f"{API_BASE_URL}/context/employee"
+EMPLOYEE_URL = f"{API_BASE_URL}/entity/employee"
 REQUEST_TIMEOUT_SECONDS = 15
 
 
@@ -30,8 +32,9 @@ class MoySkladNetworkError(MoySkladAuthError):
 
 def authenticate(login: str, password: str) -> AppSession:
     token = _request_token(login, password)
-    operator_name = _request_operator_name(token)
-    return AppSession(access_token=token, operator_name=operator_name or login)
+    operator_name, employee_id = _request_operator_profile(token)
+    system_role = _request_operator_role(token, employee_id)
+    return AppSession(access_token=token, operator_name=operator_name or login, system_role=system_role)
 
 
 def _request_token(login: str, password: str) -> str:
@@ -55,7 +58,7 @@ def _request_token(login: str, password: str) -> str:
     return token
 
 
-def _request_operator_name(token: str) -> str:
+def _request_operator_profile(token: str) -> tuple[str, str]:
     request = urllib.request.Request(
         EMPLOYEE_CONTEXT_URL,
         headers={
@@ -67,12 +70,64 @@ def _request_operator_name(token: str) -> str:
     )
 
     payload = _open_json(request)
+    return _extract_operator_name(payload), _extract_string(payload, "id")
+
+
+def _request_operator_role(token: str, employee_id: str) -> str:
+    if not employee_id:
+        return ""
+
+    request = urllib.request.Request(
+        f"{EMPLOYEE_URL}/{quote(employee_id)}/security",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json;charset=utf-8",
+            "Accept-Encoding": "gzip",
+        },
+        method="GET",
+    )
+
+    try:
+        payload = _open_json(request)
+    except MoySkladAuthError:
+        return ""
+    return _extract_role_name(payload)
+
+
+def _extract_operator_name(payload: dict) -> str:
     name = payload.get("name")
     if isinstance(name, str) and name.strip():
         return name.strip()
 
     parts = [payload.get("lastName"), payload.get("firstName"), payload.get("middleName")]
     return " ".join(part.strip() for part in parts if isinstance(part, str) and part.strip())
+
+
+def _extract_role_name(payload: dict) -> str:
+    role = payload.get("role") if isinstance(payload.get("role"), dict) else payload
+    name = _extract_named_value(role)
+    if name:
+        return name
+
+    meta = role.get("meta")
+    if isinstance(meta, dict):
+        href = _extract_string(meta, "href")
+        if href:
+            return href.rstrip("/").rsplit("/", 1)[-1]
+    return ""
+
+
+def _extract_string(payload: dict, key: str) -> str:
+    value = payload.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else ""
+
+
+def _extract_named_value(payload: dict) -> str:
+    for key in ("name", "code", "type", "title", "description"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 def _open_json(request: urllib.request.Request) -> dict:

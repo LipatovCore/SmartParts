@@ -87,6 +87,7 @@ class LoginWindow(QMainWindow):
 
     def _open_dashboard(self, session: AppSession) -> None:
         self.session = session
+        print(f"User system role: {session.system_role or 'unknown'}", flush=True)
         self.canvas.set_busy(False)
         self.canvas.reset()
         self.dashboard_window = DashboardWindow(session)

@@ -147,6 +147,11 @@ def dashboard_stylesheet() -> str:
         color: #DDEAF2;
         font-weight: 700;
     }}
+    #sessionRoleText {{
+        color: #8FA8B9;
+        font-size: 12px;
+        font-weight: 600;
+    }}
     #logoutButton,
     #secondaryAction {{
         background: #132531;
