@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from smartparts.session import AppSession
 from smartparts.theme import CYAN, MINT, RED, WINDOW_HEIGHT, WINDOW_WIDTH
 from smartparts.ui.icons import IconWidget
+from smartparts.ui.order_creation_window import OrderCreationCanvas
 from smartparts.ui.styles import dashboard_stylesheet
 
 
@@ -34,9 +35,7 @@ class DashboardWindow(QMainWindow):
         self._fullscreen_shortcut.activated.connect(self._toggle_fullscreen)
         self._exit_fullscreen_shortcut = QShortcut(QKeySequence("Esc"), self)
         self._exit_fullscreen_shortcut.activated.connect(self._exit_fullscreen)
-        canvas = DashboardCanvas(session)
-        canvas.logout_requested.connect(self.logout_requested.emit)
-        self.setCentralWidget(canvas)
+        self._show_dashboard()
 
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():
@@ -48,9 +47,24 @@ class DashboardWindow(QMainWindow):
         if self.isFullScreen():
             self.showNormal()
 
+    def _show_dashboard(self) -> None:
+        self.setWindowTitle("SmartParts - Рабочий стол")
+        canvas = DashboardCanvas(self.session)
+        canvas.logout_requested.connect(self.logout_requested.emit)
+        canvas.create_order_requested.connect(self._show_order_creation)
+        self.setCentralWidget(canvas)
+
+    def _show_order_creation(self) -> None:
+        self.setWindowTitle("SmartParts - Создание заказа или поставки")
+        canvas = OrderCreationCanvas(self.session)
+        canvas.logout_requested.connect(self.logout_requested.emit)
+        canvas.return_to_dashboard_requested.connect(self._show_dashboard)
+        self.setCentralWidget(canvas)
+
 
 class DashboardCanvas(QWidget):
     logout_requested = Signal()
+    create_order_requested = Signal()
 
     def __init__(self, session: AppSession) -> None:
         super().__init__()
@@ -248,7 +262,10 @@ class DashboardCanvas(QWidget):
         row = QHBoxLayout()
         row.setSpacing(18)
         for icon, color, title, description, action, action_icon, primary in cards:
-            row.addWidget(self._mode_card(icon, color, title, description, action, action_icon, primary), 1)
+            card, button = self._mode_card(icon, color, title, description, action, action_icon, primary)
+            if primary:
+                button.clicked.connect(self.create_order_requested.emit)
+            row.addWidget(card, 1)
         return row
 
     def _mode_card(
@@ -260,7 +277,7 @@ class DashboardCanvas(QWidget):
         action: str,
         action_icon: str,
         primary: bool,
-    ) -> QFrame:
+    ) -> tuple[QFrame, QPushButton]:
         card = QFrame()
         card.setObjectName("modeCardPrimary" if primary else ("modeCardAccent" if color == MINT else "modeCard"))
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -297,7 +314,7 @@ class DashboardCanvas(QWidget):
         button.setCursor(Qt.PointingHandCursor)
         button.setFixedHeight(44)
         layout.addWidget(button)
-        return card
+        return card, button
 
     def _summary_panel(self) -> QFrame:
         panel = QFrame()

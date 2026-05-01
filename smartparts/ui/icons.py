@@ -51,6 +51,18 @@ class IconWidget(QWidget):
             self._paint_cog(painter)
         elif self.kind == "search":
             self._paint_search(painter)
+        elif self.kind == "history":
+            self._paint_history(painter)
+        elif self.kind == "truck":
+            self._paint_truck(painter)
+        elif self.kind == "warehouse":
+            self._paint_warehouse(painter)
+        elif self.kind == "rotate-ccw":
+            self._paint_rotate_ccw(painter)
+        elif self.kind == "arrow-left":
+            self._paint_arrow_left(painter)
+        elif self.kind == "x":
+            self._paint_x(painter)
         elif self.kind == "plus":
             self._paint_plus(painter)
         elif self.kind == "check":
@@ -155,6 +167,52 @@ class IconWidget(QWidget):
             QPointF(self.width() * 0.62, self.height() * 0.62),
             QPointF(self.width() - 4, self.height() - 4),
         )
+
+    def _paint_history(self, painter: QPainter) -> None:
+        rect = QRectF(4, 4, self.width() - 8, self.height() - 8)
+        painter.drawArc(rect, 35 * 16, 295 * 16)
+        painter.drawLine(QPointF(4, self.height() * 0.3), QPointF(4, 5))
+        painter.drawLine(QPointF(4, self.height() * 0.3), QPointF(self.width() * 0.24, self.height() * 0.3))
+        painter.drawLine(QPointF(self.width() / 2, self.height() / 2), QPointF(self.width() / 2, self.height() * 0.28))
+        painter.drawLine(QPointF(self.width() / 2, self.height() / 2), QPointF(self.width() * 0.68, self.height() * 0.58))
+
+    def _paint_truck(self, painter: QPainter) -> None:
+        painter.drawRoundedRect(QRectF(3, self.height() * 0.34, self.width() * 0.54, self.height() * 0.34), 2, 2)
+        path = QPainterPath()
+        path.moveTo(self.width() * 0.57, self.height() * 0.42)
+        path.lineTo(self.width() * 0.74, self.height() * 0.42)
+        path.lineTo(self.width() - 3, self.height() * 0.57)
+        path.lineTo(self.width() - 3, self.height() * 0.68)
+        path.lineTo(self.width() * 0.57, self.height() * 0.68)
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.drawEllipse(QRectF(self.width() * 0.18, self.height() * 0.64, 4, 4))
+        painter.drawEllipse(QRectF(self.width() * 0.72, self.height() * 0.64, 4, 4))
+
+    def _paint_warehouse(self, painter: QPainter) -> None:
+        path = QPainterPath()
+        path.moveTo(3, self.height() * 0.42)
+        path.lineTo(self.width() / 2, 4)
+        path.lineTo(self.width() - 3, self.height() * 0.42)
+        painter.drawPath(path)
+        painter.drawRect(QRectF(5, self.height() * 0.42, self.width() - 10, self.height() * 0.44))
+        for x in (0.32, 0.5, 0.68):
+            painter.drawLine(QPointF(self.width() * x, self.height() * 0.52), QPointF(self.width() * x, self.height() * 0.86))
+
+    def _paint_rotate_ccw(self, painter: QPainter) -> None:
+        rect = QRectF(4, 4, self.width() - 8, self.height() - 8)
+        painter.drawArc(rect, 35 * 16, 275 * 16)
+        painter.drawLine(QPointF(4, self.height() * 0.28), QPointF(4, 4))
+        painter.drawLine(QPointF(4, self.height() * 0.28), QPointF(self.width() * 0.28, self.height() * 0.28))
+
+    def _paint_arrow_left(self, painter: QPainter) -> None:
+        painter.drawLine(QPointF(5, self.height() / 2), QPointF(self.width() - 4, self.height() / 2))
+        painter.drawLine(QPointF(5, self.height() / 2), QPointF(self.width() * 0.38, self.height() * 0.24))
+        painter.drawLine(QPointF(5, self.height() / 2), QPointF(self.width() * 0.38, self.height() * 0.76))
+
+    def _paint_x(self, painter: QPainter) -> None:
+        painter.drawLine(QPointF(5, 5), QPointF(self.width() - 5, self.height() - 5))
+        painter.drawLine(QPointF(self.width() - 5, 5), QPointF(5, self.height() - 5))
 
     def _paint_plus(self, painter: QPainter) -> None:
         painter.drawLine(QPointF(self.width() / 2, 4), QPointF(self.width() / 2, self.height() - 4))

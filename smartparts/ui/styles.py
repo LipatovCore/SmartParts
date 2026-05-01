@@ -244,3 +244,199 @@ def dashboard_stylesheet() -> str:
         font-weight: 700;
     }}
     """
+
+
+def order_creation_stylesheet() -> str:
+    return f"""
+    #orderCanvas {{
+        background: transparent;
+        font-family: Arial;
+    }}
+    #sidebar {{
+        background: #0B1219;
+        border-right: 1px solid #263948;
+    }}
+    #mainWorkspace {{
+        background: #111A23;
+    }}
+    #brandAccent {{
+        border-radius: 2px;
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {CYAN}, stop:1 {MINT});
+    }}
+    #brandTitle,
+    #pageTitle,
+    #panelTitle {{
+        color: #F4FAFF;
+        font-weight: 700;
+    }}
+    #brandTitle {{
+        font-size: 28px;
+    }}
+    #brandSubtitle,
+    #pageSubtitle,
+    #mutedText,
+    #fieldLabel,
+    #tableHead,
+    #hintText {{
+        color: #8FA8B9;
+    }}
+    #sessionTitle,
+    #hintTitle {{
+        color: {CYAN};
+        font-size: 13px;
+        font-weight: 700;
+    }}
+    #sessionCard,
+    #formPanel,
+    #productsPanel,
+    #totalsPanel,
+    #hintBox {{
+        background: #101B24;
+        border: 1px solid #263948;
+        border-radius: 8px;
+    }}
+    #sessionCard {{
+        background: #0F1B24;
+    }}
+    #navActive,
+    #navButton,
+    #secondaryAction,
+    #backToDashboardButton,
+    #newDocumentButton {{
+        background: #132531;
+        border: 1px solid rgba(45, 226, 230, 0.55);
+        border-radius: 6px;
+    }}
+    #navButton {{
+        background: transparent;
+        border: none;
+        color: #8FA8B9;
+        font-size: 14px;
+        font-weight: 600;
+        text-align: left;
+        padding: 0 12px;
+    }}
+    #navActive {{
+        color: #F4FAFF;
+        font-size: 14px;
+        font-weight: 700;
+        text-align: left;
+        padding: 0 12px;
+    }}
+    #logoutButton,
+    #secondaryAction,
+    #backToDashboardButton,
+    #newDocumentButton {{
+        color: #DDEAF2;
+        font-size: 13px;
+        font-weight: 700;
+    }}
+    #pageTitle {{
+        font-size: 28px;
+    }}
+    #pageSubtitle {{
+        font-size: 14px;
+    }}
+    #fieldLabel {{
+        font-size: 12px;
+        font-weight: 700;
+    }}
+    #inputShell,
+    #searchShell,
+    #toggleInactive {{
+        background: #0B141C;
+        border: 1px solid #263948;
+        border-radius: 6px;
+    }}
+    #searchShell {{
+        border-color: rgba(45, 226, 230, 0.42);
+    }}
+    #lineEdit {{
+        color: #F4FAFF;
+        background: transparent;
+        border: none;
+        font-size: 14px;
+        selection-background-color: {CYAN};
+        selection-color: #061116;
+    }}
+    #toggleActive {{
+        color: #F4FAFF;
+        font-size: 13px;
+        font-weight: 700;
+        background: rgba(45, 226, 230, 0.14);
+        border: 1px solid {CYAN};
+        border-radius: 6px;
+    }}
+    #toggleInactive {{
+        color: #8FA8B9;
+        font-size: 13px;
+        font-weight: 700;
+    }}
+    #primaryAction {{
+        color: #061116;
+        font-size: 14px;
+        font-weight: 700;
+        border: 1px solid #A9FFF0;
+        border-radius: 6px;
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {CYAN}, stop:1 {MINT});
+    }}
+    #primaryAction:hover {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5AF7FA, stop:1 #5DFFC0);
+    }}
+    #productsTable {{
+        background: #0F1B24;
+        border: 1px solid #263948;
+        border-radius: 4px;
+        color: #DDEAF2;
+        gridline-color: #263948;
+        font-size: 12px;
+        selection-background-color: rgba(45, 226, 230, 0.18);
+        selection-color: #F4FAFF;
+    }}
+    #productsTable::item {{
+        padding: 7px;
+    }}
+    #deleteRowButton {{
+        background: #2A171B;
+        border: 1px solid {RED};
+        border-radius: 4px;
+        padding: 0;
+    }}
+    #deleteRowButton:hover {{
+        background: #3A1D22;
+        border-color: #FF7A85;
+    }}
+    QHeaderView::section {{
+        background: #0B141C;
+        color: #8FA8B9;
+        border: none;
+        border-right: 1px solid #263948;
+        border-bottom: 1px solid #263948;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 8px;
+    }}
+    #totalLabel {{
+        color: #8FA8B9;
+        font-size: 12px;
+    }}
+    #totalValue {{
+        color: #F4FAFF;
+        font-size: 12px;
+        font-weight: 700;
+    }}
+    #totalValueAccent {{
+        color: {MINT};
+        font-size: 12px;
+        font-weight: 700;
+    }}
+    #operatorText {{
+        color: #DDEAF2;
+        font-weight: 700;
+    }}
+    #sessionRoleText {{
+        color: #8FA8B9;
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    """
