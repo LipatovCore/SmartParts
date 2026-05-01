@@ -385,6 +385,29 @@ def order_creation_stylesheet() -> str:
         selection-background-color: {CYAN};
         selection-color: #061116;
     }}
+    #lineEdit[accentText="true"] {{
+        color: {MINT};
+        font-weight: 700;
+    }}
+    #comboBox {{
+        color: #F4FAFF;
+        background: #0B141C;
+        border: 1px solid #263948;
+        border-radius: 6px;
+        padding: 0 10px;
+        font-size: 13px;
+        font-weight: 700;
+    }}
+    #comboBox::drop-down {{
+        border: none;
+        width: 24px;
+    }}
+    #comboBox QAbstractItemView {{
+        color: #F4FAFF;
+        background: #0B1219;
+        border: 1px solid #263948;
+        selection-background-color: rgba(45, 226, 230, 0.24);
+    }}
     #toggleActive {{
         color: #F4FAFF;
         font-size: 13px;
@@ -485,6 +508,10 @@ def order_creation_stylesheet() -> str:
         font-size: 14px;
         selection-background-color: {CYAN};
         selection-color: #061116;
+    }}
+    #productsTable #brandSelectLineEdit {{
+        font-size: 13px;
+        font-weight: 700;
     }}
     #brandSelectDropdown {{
         background: #0B1219;

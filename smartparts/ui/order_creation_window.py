@@ -5,6 +5,7 @@ from PySide6.QtGui import QColor, QIntValidator, QLinearGradient, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -58,7 +59,7 @@ class BrandOptionRow(QFrame):
 class BrandSelect(QWidget):
     text_changed = Signal(str)
 
-    def __init__(self, brand_names: list[str], popup_parent: QWidget, value: str = "") -> None:
+    def __init__(self, brand_names: list[str], popup_parent: QWidget, value: str = "", *, show_label: bool = True, compact: bool = False) -> None:
         super().__init__()
         self._brand_names = sorted({name.strip() for name in brand_names if name.strip()})
         self._popup_parent = popup_parent
@@ -69,27 +70,33 @@ class BrandSelect(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(6 if show_label else 0)
 
-        label = QLabel("Бренд")
-        label.setObjectName("fieldLabel")
-        layout.addWidget(label)
+        if show_label:
+            label = QLabel("Бренд")
+            label.setObjectName("fieldLabel")
+            layout.addWidget(label)
 
         shell = QFrame()
         shell.setObjectName("brandSelectInput")
-        shell.setFixedHeight(42)
+        shell.setFixedHeight(34 if compact else 42)
         shell_layout = QHBoxLayout(shell)
-        shell_layout.setContentsMargins(12, 0, 12, 0)
-        shell_layout.setSpacing(10)
-        shell_layout.addWidget(IconWidget("search", CYAN, 16))
+        shell_layout.setContentsMargins(8 if compact else 12, 0, 8 if compact else 12, 0)
+        shell_layout.setSpacing(6 if compact else 10)
+        if not compact:
+            shell_layout.addWidget(IconWidget("search", CYAN, 16))
 
         self._line_edit = QLineEdit(value)
         self._line_edit.setObjectName("brandSelectLineEdit")
         self._line_edit.setFrame(False)
+        self._line_edit.setToolTip(value)
+        if compact:
+            self.setMinimumWidth(150)
+            self._line_edit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self._line_edit.installEventFilter(self)
         self._line_edit.textEdited.connect(self._handle_text_edited)
         shell_layout.addWidget(self._line_edit, 1)
-        shell_layout.addWidget(IconWidget("chevron-down", "#8FA8B9", 16))
+        shell_layout.addWidget(IconWidget("chevron-down", "#8FA8B9", 14 if compact else 16))
         layout.addWidget(shell)
 
         self._dropdown = QFrame(popup_parent)
@@ -105,6 +112,7 @@ class BrandSelect(QWidget):
     def setText(self, value: str) -> None:  # noqa: N802 - mirrors QLineEdit API
         self._is_applying_text = True
         self._line_edit.setText(value)
+        self._line_edit.setToolTip(value)
         self._is_applying_text = False
         self.text_changed.emit(value)
         self._committed_value = value
@@ -138,6 +146,7 @@ class BrandSelect(QWidget):
     def _handle_text_edited(self, query: str) -> None:
         if self._is_applying_text:
             return
+        self._line_edit.setToolTip(query)
         self._has_pending_edit = True
         self._suggestions = self._closest_brands(query)
         self._render_dropdown(query)
@@ -203,6 +212,7 @@ class BrandSelect(QWidget):
     def _commit_value(self, value: str) -> None:
         self._is_applying_text = True
         self._line_edit.setText(value)
+        self._line_edit.setToolTip(value)
         self._is_applying_text = False
         self.text_changed.emit(value)
         self._committed_value = value
@@ -218,10 +228,10 @@ class BrandSelect(QWidget):
 
     def _reset_pending_edit(self) -> None:
         self._is_applying_text = True
-        self._line_edit.setText("")
+        self._line_edit.setText(self._committed_value)
+        self._line_edit.setToolTip(self._committed_value)
         self._is_applying_text = False
-        self.text_changed.emit("")
-        self._committed_value = ""
+        self.text_changed.emit(self._committed_value)
         self._has_pending_edit = False
         self._dropdown.hide()
 
@@ -259,6 +269,20 @@ class OrderCreationCanvas(QWidget):
     def __init__(self, session: AppSession) -> None:
         super().__init__()
         self.session = session
+        self._brand_names = [brand.name for brand in self.session.brands]
+        self._document_type_buttons: dict[str, QPushButton] = {}
+        self._selected_document_type = "order"
+        self._updating_table = False
+        self._product_table_base_widths = {
+            0: 106,
+            1: 320,
+            2: 176,
+            3: 72,
+            4: 96,
+            5: 96,
+            6: 104,
+            7: 42,
+        }
         self.setObjectName("orderCanvas")
         self.setStyleSheet(order_creation_stylesheet())
 
@@ -314,7 +338,9 @@ class OrderCreationCanvas(QWidget):
         layout = QVBoxLayout(navigation)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
-        layout.addWidget(self._nav_button("file-plus", "Новый документ", True))
+        new_document = self._nav_button("file-plus", "Новый документ", True)
+        new_document.clicked.connect(self._reset_document)
+        layout.addWidget(new_document)
         layout.addWidget(self._nav_button("history", "Черновики", False))
         layout.addWidget(self._nav_button("truck", "Поставщики", False))
         return navigation
@@ -419,6 +445,7 @@ class OrderCreationCanvas(QWidget):
         reset.setIconSize(QSize(16, 16))
         reset.setCursor(Qt.PointingHandCursor)
         reset.setFixedHeight(38)
+        reset.clicked.connect(self._reset_document)
 
         layout.addWidget(text, 1)
         layout.addWidget(back)
@@ -431,9 +458,12 @@ class OrderCreationCanvas(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         layout.addWidget(self._document_type(), 0)
-        layout.addWidget(self._field_panel("Клиент из МойСклад", "ООО АвтоМаркет Север", "search"), 1)
-        layout.addWidget(self._field_panel("Склад", "Основной", "warehouse", fixed_width=220), 0)
-        layout.addWidget(self._field_panel("Предоплата", "15 000 ₽", None, fixed_width=150, bold=True), 0)
+        client_panel, self._client_input = self._field_input_panel("Клиент из МойСклад", "ООО АвтоМаркет Север", "search")
+        layout.addWidget(client_panel, 1)
+        layout.addWidget(self._warehouse_panel(), 0)
+        prepayment_panel, self._prepayment_input = self._field_input_panel("Предоплата", "", None, fixed_width=150, bold=True)
+        self._prepayment_input.textChanged.connect(self._update_totals)
+        layout.addWidget(prepayment_panel, 0)
         return controls
 
     def _document_type(self) -> QFrame:
@@ -450,14 +480,75 @@ class OrderCreationCanvas(QWidget):
 
         row = QHBoxLayout()
         row.setSpacing(6)
-        for text, active in (("Заказ", True), ("Поставка", False)):
+        for key, text, active in (("order", "Заказ", True), ("supply", "Поставка", False)):
             button = QPushButton(text)
             button.setObjectName("toggleActive" if active else "toggleInactive")
             button.setCursor(Qt.PointingHandCursor)
             button.setFixedHeight(34)
+            button.clicked.connect(lambda checked=False, document_type=key: self._set_document_type(document_type))
+            self._document_type_buttons[key] = button
             row.addWidget(button, 1)
         layout.addLayout(row)
         return panel
+
+    def _set_document_type(self, document_type: str) -> None:
+        self._selected_document_type = document_type
+        for key, button in self._document_type_buttons.items():
+            button.setObjectName("toggleActive" if key == document_type else "toggleInactive")
+            button.style().unpolish(button)
+            button.style().polish(button)
+
+    def _warehouse_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("formPanel")
+        panel.setFixedWidth(220)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(8)
+
+        label = QLabel("Склад")
+        label.setObjectName("fieldLabel")
+        layout.addWidget(label)
+
+        select = QComboBox()
+        self._warehouse_select = select
+        select.setObjectName("comboBox")
+        select.addItems(("Северный", "Давыдовский"))
+        select.setFixedHeight(34)
+        layout.addWidget(select)
+        return panel
+
+    def _field_input_panel(self, label_text: str, value: str, icon: str | None, fixed_width: int | None = None, bold: bool = False) -> tuple[QFrame, QLineEdit]:
+        panel = QFrame()
+        panel.setObjectName("formPanel")
+        if fixed_width is not None:
+            panel.setFixedWidth(fixed_width)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(8)
+
+        label = QLabel(label_text)
+        label.setObjectName("fieldLabel")
+        layout.addWidget(label)
+
+        shell = QFrame()
+        shell.setObjectName("inputShell")
+        shell.setFixedHeight(34)
+        row = QHBoxLayout(shell)
+        row.setContentsMargins(12, 0, 12, 0)
+        row.setSpacing(10)
+        if icon is not None:
+            row.addWidget(IconWidget(icon, CYAN if icon == "warehouse" else "#8FA8B9", 16))
+        field = QLineEdit(value)
+        field.setObjectName("lineEdit")
+        field.setFrame(False)
+        if bold:
+            field.setProperty("accentText", True)
+        row.addWidget(field, 1)
+        layout.addWidget(shell)
+        return panel, field
 
     @staticmethod
     def _field_panel(label_text: str, value: str, icon: str | None, fixed_width: int | None = None, bold: bool = False) -> QFrame:
@@ -496,6 +587,7 @@ class OrderCreationCanvas(QWidget):
         layout.addWidget(self._products_panel(), 1)
         self._totals_panel_widget = self._totals_panel()
         layout.addWidget(self._totals_panel_widget)
+        self._update_totals()
         return content
 
     def _products_panel(self) -> QFrame:
@@ -546,16 +638,16 @@ class OrderCreationCanvas(QWidget):
         table.setHorizontalHeaderLabels(("Артикул", "Название", "Бренд", "Кол-во", "Закупка", "Продажа", "Сумма", ""))
         table.verticalHeader().setVisible(False)
         table.setShowGrid(False)
+        table.setWordWrap(True)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.EditKeyPressed)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         table.horizontalHeader().setStretchLastSection(False)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        for column, width in ((0, 86), (2, 76), (3, 58), (4, 78), (5, 78), (6, 84), (7, 42)):
+        for column, width in self._product_table_base_widths.items():
             table.setColumnWidth(column, width)
-        table.verticalHeader().setDefaultSectionSize(44)
+        table.verticalHeader().setDefaultSectionSize(58)
         table.setAlternatingRowColors(False)
 
         rows = (
@@ -563,19 +655,28 @@ class OrderCreationCanvas(QWidget):
             ("GDB1550", "Колодки тормозные", "TRW", "1", "3 900 ₽", "5 450 ₽", "5 450 ₽"),
         )
         for row_index, row in enumerate(rows):
-            for column_index, value in enumerate(row):
-                item = QTableWidgetItem(value)
-                if column_index >= 3:
-                    item.setTextAlignment(Qt.AlignCenter)
-                if column_index == 6:
-                    item.setForeground(QColor(MINT))
-                elif column_index == 0:
-                    item.setForeground(QColor("#F4FAFF"))
-                else:
-                    item.setForeground(QColor("#DDEAF2"))
-                table.setItem(row_index, column_index, item)
-            table.setCellWidget(row_index, 7, self._delete_row_button(table))
+            self._fill_table_row(row_index, row[:6])
+        table.itemChanged.connect(self._handle_table_item_changed)
+        self._update_totals()
+        QTimer.singleShot(0, self._resize_product_table_columns)
         return table
+
+    def _resize_product_table_columns(self) -> None:
+        if not hasattr(self, "_products_table_widget"):
+            return
+        table = self._products_table_widget
+        available_width = table.viewport().width()
+        base_total = sum(self._product_table_base_widths.values())
+        extra_width = max(0, available_width - base_total)
+
+        name_extra = int(extra_width * 0.68)
+        brand_extra = extra_width - name_extra
+        for column, width in self._product_table_base_widths.items():
+            if column == 1:
+                width += name_extra
+            elif column == 2:
+                width += brand_extra
+            table.setColumnWidth(column, width)
 
     def _product_add_overlay(self) -> QFrame:
         overlay = QFrame(self)
@@ -859,7 +960,6 @@ class OrderCreationCanvas(QWidget):
         table.insertRow(row_index)
 
         quantity = int(self._qty_input.text())
-        sale_price = self._rubles_to_int(self._sale_input.text())
         values = (
             self._article_input.text().strip(),
             self._name_input.text().strip(),
@@ -867,20 +967,9 @@ class OrderCreationCanvas(QWidget):
             str(quantity),
             self._purchase_input.text().strip(),
             self._sale_input.text().strip(),
-            self._format_rubles(quantity * sale_price),
         )
-        for column_index, value in enumerate(values):
-            item = QTableWidgetItem(value)
-            if column_index >= 3:
-                item.setTextAlignment(Qt.AlignCenter)
-            if column_index == 6:
-                item.setForeground(QColor(MINT))
-            elif column_index == 0:
-                item.setForeground(QColor("#F4FAFF"))
-            else:
-                item.setForeground(QColor("#DDEAF2"))
-            table.setItem(row_index, column_index, item)
-        table.setCellWidget(row_index, 7, self._delete_row_button(table))
+        self._fill_table_row(row_index, values)
+        self._update_totals()
 
         if keep_open:
             self._reset_product_form()
@@ -918,6 +1007,90 @@ class OrderCreationCanvas(QWidget):
         self._comment_input.clear()
         self._update_product_actions()
 
+    def _fill_table_row(self, row_index: int, values: tuple[str, str, str, str, str, str]) -> None:
+        table = self._products_table_widget
+        self._updating_table = True
+        article, name, brand, quantity, purchase, sale = values
+        for column_index, value in enumerate((article, name, quantity, purchase, sale)):
+            table_column = column_index if column_index < 2 else column_index + 1
+            table.setItem(row_index, table_column, self._table_item(value, table_column))
+
+        brand_select = BrandSelect(self._brand_names, self, brand, show_label=False, compact=True)
+        brand_select.text_changed.connect(self._update_totals)
+        table.setCellWidget(row_index, 2, brand_select)
+        table.setItem(row_index, 6, self._table_item("", 6))
+        table.setCellWidget(row_index, 7, self._delete_row_button(table, self._update_totals))
+        self._updating_table = False
+        self._recalculate_row_total(row_index)
+
+    @staticmethod
+    def _table_item(value: str, column_index: int) -> QTableWidgetItem:
+        item = QTableWidgetItem(value)
+        item.setToolTip(value)
+        if column_index >= 3:
+            item.setTextAlignment(Qt.AlignCenter)
+        elif column_index == 1:
+            item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        if column_index == 6:
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            item.setForeground(QColor(MINT))
+        elif column_index == 0:
+            item.setForeground(QColor("#F4FAFF"))
+        else:
+            item.setForeground(QColor("#DDEAF2"))
+        return item
+
+    def _handle_table_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._updating_table:
+            return
+        item.setToolTip(item.text())
+        if item.column() in (3, 5):
+            self._recalculate_row_total(item.row())
+        self._update_totals()
+
+    def _recalculate_row_total(self, row_index: int) -> None:
+        table = self._products_table_widget
+        quantity_item = table.item(row_index, 3)
+        sale_item = table.item(row_index, 5)
+        quantity = self._rubles_to_int(quantity_item.text() if quantity_item is not None else "")
+        sale_price = self._rubles_to_int(sale_item.text() if sale_item is not None else "")
+        self._updating_table = True
+        total_item = table.item(row_index, 6)
+        if total_item is None:
+            total_item = self._table_item("", 6)
+            table.setItem(row_index, 6, total_item)
+        total_text = self._format_rubles(quantity * sale_price)
+        total_item.setText(total_text)
+        total_item.setToolTip(total_text)
+        self._updating_table = False
+        self._update_totals()
+
+    def _reset_document(self) -> None:
+        self._products_table_widget.setRowCount(0)
+        self._client_input.clear()
+        self._prepayment_input.clear()
+        self._set_document_type("order")
+        self._warehouse_select.setCurrentIndex(0)
+        self._update_totals()
+
+    def _update_totals(self) -> None:
+        if not hasattr(self, "_products_table_widget") or not hasattr(self, "_total_positions_value"):
+            return
+        purchase_total = 0
+        sale_total = 0
+        for row in range(self._products_table_widget.rowCount()):
+            quantity_item = self._products_table_widget.item(row, 3)
+            purchase_item = self._products_table_widget.item(row, 4)
+            sale_item = self._products_table_widget.item(row, 5)
+            quantity = self._rubles_to_int(quantity_item.text() if quantity_item is not None else "")
+            purchase_total += quantity * self._rubles_to_int(purchase_item.text() if purchase_item is not None else "")
+            sale_total += quantity * self._rubles_to_int(sale_item.text() if sale_item is not None else "")
+
+        self._total_positions_value.setText(str(self._products_table_widget.rowCount()))
+        self._total_purchase_value.setText(self._format_rubles(purchase_total))
+        self._total_sale_value.setText(self._format_rubles(sale_total))
+        self._total_prepayment_value.setText(self._format_rubles(self._rubles_to_int(self._prepayment_input.text())))
+
     @staticmethod
     def _rubles_to_int(value: str) -> int:
         digits = "".join(ch for ch in value if ch.isdigit())
@@ -934,7 +1107,7 @@ class OrderCreationCanvas(QWidget):
         self._product_add_window.setFixedSize(width, height)
 
     @staticmethod
-    def _delete_row_button(table: QTableWidget) -> QFrame:
+    def _delete_row_button(table: QTableWidget, after_remove: object | None = None) -> QFrame:
         holder = QFrame()
         layout = QHBoxLayout(holder)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -951,6 +1124,8 @@ class OrderCreationCanvas(QWidget):
             for row in range(table.rowCount()):
                 if table.cellWidget(row, 7) is holder:
                     table.removeRow(row)
+                    if callable(after_remove):
+                        after_remove()
                     break
 
         button.clicked.connect(remove_row)
@@ -970,13 +1145,16 @@ class OrderCreationCanvas(QWidget):
         title.setStyleSheet("font-size: 18px;")
         layout.addWidget(title)
 
-        for label, value, accent in (
-            ("Позиций", "12", False),
-            ("Закупка", "280 400 ₽", False),
-            ("Продажа", "341 900 ₽", True),
-            ("Предоплата", "15 000 ₽", True),
-        ):
-            layout.addLayout(self._total_row(label, value, accent))
+        total_rows = (
+            ("positions", "Позиций", "0", False),
+            ("purchase", "Закупка", "0 ₽", False),
+            ("sale", "Продажа", "0 ₽", True),
+            ("prepayment", "Предоплата", "0 ₽", True),
+        )
+        for key, label, value, accent in total_rows:
+            row, value_widget = self._total_row(label, value, accent)
+            setattr(self, f"_total_{key}_value", value_widget)
+            layout.addLayout(row)
 
         divider = QFrame()
         divider.setFixedHeight(1)
@@ -1016,7 +1194,7 @@ class OrderCreationCanvas(QWidget):
         return panel
 
     @staticmethod
-    def _total_row(label: str, value: str, accent: bool) -> QHBoxLayout:
+    def _total_row(label: str, value: str, accent: bool) -> tuple[QHBoxLayout, QLabel]:
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(10)
@@ -1026,7 +1204,7 @@ class OrderCreationCanvas(QWidget):
         value_widget.setObjectName("totalValueAccent" if accent else "totalValue")
         row.addWidget(label_widget, 1)
         row.addWidget(value_widget)
-        return row
+        return row, value_widget
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt API naming
         painter = QPainter(self)
@@ -1052,3 +1230,4 @@ class OrderCreationCanvas(QWidget):
         if self._product_overlay.isVisible():
             self._position_product_overlay()
         super().resizeEvent(event)
+        QTimer.singleShot(0, self._resize_product_table_columns)
