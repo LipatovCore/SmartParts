@@ -1,7 +1,8 @@
 from collections.abc import Iterable
+from dataclasses import replace
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QKeySequence, QLinearGradient, QPainter, QShortcut
+from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QColor, QKeySequence, QLinearGradient, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -16,10 +17,29 @@ from PySide6.QtWidgets import (
 )
 
 from smartparts.session import AppSession
+from smartparts.services.moysklad import load_brands
 from smartparts.theme import CYAN, MINT, RED, WINDOW_HEIGHT, WINDOW_WIDTH
 from smartparts.ui.icons import IconWidget
 from smartparts.ui.order_creation_window import OrderCreationCanvas
 from smartparts.ui.styles import dashboard_stylesheet
+
+
+class BrandLoaderWorker(QObject):
+    succeeded = Signal(object)
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(self, access_token: str) -> None:
+        super().__init__()
+        self._access_token = access_token
+
+    def run(self) -> None:
+        try:
+            self.succeeded.emit(load_brands(self._access_token))
+        except Exception as error:
+            self.failed.emit(str(error))
+        finally:
+            self.finished.emit()
 
 
 class DashboardWindow(QMainWindow):
@@ -31,11 +51,16 @@ class DashboardWindow(QMainWindow):
         self.setWindowTitle("SmartParts - Рабочий стол")
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setMinimumSize(820, 560)
+        self._dashboard_canvas: DashboardCanvas | None = None
+        self._brands_loading = True
+        self._brand_loader_thread: QThread | None = None
+        self._brand_loader_worker: BrandLoaderWorker | None = None
         self._fullscreen_shortcut = QShortcut(QKeySequence("F11"), self)
         self._fullscreen_shortcut.activated.connect(self._toggle_fullscreen)
         self._exit_fullscreen_shortcut = QShortcut(QKeySequence("Esc"), self)
         self._exit_fullscreen_shortcut.activated.connect(self._exit_fullscreen)
         self._show_dashboard()
+        QTimer.singleShot(0, self._load_brands)
 
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():
@@ -49,26 +74,90 @@ class DashboardWindow(QMainWindow):
 
     def _show_dashboard(self) -> None:
         self.setWindowTitle("SmartParts - Рабочий стол")
-        canvas = DashboardCanvas(self.session)
+        canvas = DashboardCanvas(self.session, self._brands_loading)
+        self._dashboard_canvas = canvas
         canvas.logout_requested.connect(self.logout_requested.emit)
         canvas.create_order_requested.connect(self._show_order_creation)
         self.setCentralWidget(canvas)
 
     def _show_order_creation(self) -> None:
         self.setWindowTitle("SmartParts - Создание заказа или поставки")
+        self._dashboard_canvas = None
         canvas = OrderCreationCanvas(self.session)
         canvas.logout_requested.connect(self.logout_requested.emit)
         canvas.return_to_dashboard_requested.connect(self._show_dashboard)
         self.setCentralWidget(canvas)
+
+    def _load_brands(self) -> None:
+        if self._brand_loader_thread is not None:
+            return
+
+        self._brands_loading = True
+        if self._dashboard_canvas is not None:
+            self._dashboard_canvas.set_brands_loading(True)
+
+        self._brand_loader_thread = QThread(self)
+        self._brand_loader_worker = BrandLoaderWorker(self.session.access_token)
+        self._brand_loader_worker.moveToThread(self._brand_loader_thread)
+        self._brand_loader_thread.started.connect(self._brand_loader_worker.run)
+        self._brand_loader_worker.succeeded.connect(self._apply_loaded_brands)
+        self._brand_loader_worker.failed.connect(self._handle_brand_load_error)
+        self._brand_loader_worker.finished.connect(self._brand_loader_thread.quit)
+        self._brand_loader_worker.finished.connect(self._brand_loader_worker.deleteLater)
+        self._brand_loader_thread.finished.connect(self._brand_loader_thread.deleteLater)
+        self._brand_loader_thread.finished.connect(self._clear_brand_loader)
+        self._brand_loader_thread.start()
+
+    def _apply_loaded_brands(self, brands: object) -> None:
+        self.session = replace(self.session, brands=tuple(brands))
+        self._brands_loading = False
+        if self._dashboard_canvas is not None:
+            self._dashboard_canvas.set_session(self.session)
+            self._dashboard_canvas.set_brands_loading(False)
+
+    def _handle_brand_load_error(self, message: str) -> None:
+        print(f"Failed to load MoySklad brands: {message}", flush=True)
+        self._brands_loading = False
+        if self._dashboard_canvas is not None:
+            self._dashboard_canvas.set_brands_loading(False)
+
+    def _clear_brand_loader(self) -> None:
+        self._brand_loader_thread = None
+        self._brand_loader_worker = None
+
+
+class SpinningLoaderIcon(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._angle = 0
+        self.setFixedSize(17, 17)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(45)
+
+    def _tick(self) -> None:
+        self._angle = (self._angle + 18) % 360
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt API naming
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(CYAN), 2)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawArc(self.rect().adjusted(2, 2, -2, -2), self._angle * 16, 270 * 16)
 
 
 class DashboardCanvas(QWidget):
     logout_requested = Signal()
     create_order_requested = Signal()
 
-    def __init__(self, session: AppSession) -> None:
+    def __init__(self, session: AppSession, brands_loading: bool = False) -> None:
         super().__init__()
         self.session = session
+        self._mode_buttons: list[QPushButton] = []
+        self._brands_loading = brands_loading
         self.setObjectName("dashboardCanvas")
         self.setStyleSheet(dashboard_stylesheet())
 
@@ -79,6 +168,16 @@ class DashboardCanvas(QWidget):
         self._workspace_widget = self._workspace()
         root.addWidget(self._sidebar_widget)
         root.addWidget(self._workspace_widget, 1)
+        self.set_brands_loading(brands_loading)
+
+    def set_session(self, session: AppSession) -> None:
+        self.session = session
+
+    def set_brands_loading(self, loading: bool) -> None:
+        self._brands_loading = loading
+        self._brands_loading_status.setVisible(loading)
+        for button in self._mode_buttons:
+            button.setEnabled(not loading)
 
     def _sidebar(self) -> QFrame:
         sidebar = QFrame()
@@ -94,6 +193,8 @@ class DashboardCanvas(QWidget):
 
         layout.addWidget(self._brand_area())
         layout.addStretch(1)
+        self._brands_loading_status = self._brands_loading_card()
+        layout.addWidget(self._brands_loading_status)
         layout.addWidget(self._session_panel())
         return sidebar
 
@@ -116,6 +217,31 @@ class DashboardCanvas(QWidget):
         subtitle.setObjectName("brandSubtitle")
         layout.addWidget(subtitle)
         return area
+
+    def _brands_loading_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("brandsLoadingStatus")
+
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+        layout.addWidget(SpinningLoaderIcon())
+
+        text = QFrame()
+        text_layout = QVBoxLayout(text)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(4)
+
+        title = QLabel("Загрузка брендов")
+        title.setObjectName("brandsLoadingTitle")
+        text_layout.addWidget(title)
+
+        subtitle = QLabel("Справочник брендов")
+        subtitle.setObjectName("brandsLoadingSubtitle")
+        text_layout.addWidget(subtitle)
+
+        layout.addWidget(text, 1)
+        return card
 
     def _session_panel(self) -> QFrame:
         panel = QFrame()
@@ -263,6 +389,7 @@ class DashboardCanvas(QWidget):
         row.setSpacing(18)
         for icon, color, title, description, action, action_icon, primary in cards:
             card, button = self._mode_card(icon, color, title, description, action, action_icon, primary)
+            self._mode_buttons.append(button)
             if primary:
                 button.clicked.connect(self.create_order_requested.emit)
             row.addWidget(card, 1)

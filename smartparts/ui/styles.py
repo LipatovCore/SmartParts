@@ -141,6 +141,21 @@ def dashboard_stylesheet() -> str:
         border: 1px solid #263948;
         border-radius: 8px;
     }}
+    #brandsLoadingStatus {{
+        background: #101B24;
+        border: 1px solid rgba(45, 226, 230, 0.55);
+        border-radius: 8px;
+    }}
+    #brandsLoadingTitle {{
+        color: #DDEAF2;
+        font-size: 13px;
+        font-weight: 700;
+    }}
+    #brandsLoadingSubtitle {{
+        color: #8FA8B9;
+        font-size: 11px;
+        font-weight: 600;
+    }}
     #operatorText,
     #logoutText,
     #taskLabel {{
@@ -211,6 +226,12 @@ def dashboard_stylesheet() -> str:
     }}
     #primaryAction:hover {{
         background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5AF7FA, stop:1 #5DFFC0);
+    }}
+    #primaryAction:disabled,
+    #secondaryAction:disabled {{
+        color: #6F8493;
+        background: #10202A;
+        border: 1px solid #263948;
     }}
     #secondaryAction {{
         color: #DFFDF5;
@@ -343,10 +364,15 @@ def order_creation_stylesheet() -> str:
     }}
     #inputShell,
     #searchShell,
-    #toggleInactive {{
+    #toggleInactive,
+    #productInput,
+    #productInputAccent {{
         background: #0B141C;
         border: 1px solid #263948;
         border-radius: 6px;
+    }}
+    #productInputAccent {{
+        border-color: {CYAN};
     }}
     #searchShell {{
         border-color: rgba(45, 226, 230, 0.42);
@@ -382,6 +408,147 @@ def order_creation_stylesheet() -> str:
     }}
     #primaryAction:hover {{
         background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5AF7FA, stop:1 #5DFFC0);
+    }}
+    #productOverlay {{
+        background: rgba(5, 10, 14, 0.72);
+    }}
+    #productAddWindow {{
+        background: #111A23;
+        border: 1px solid #263948;
+        border-radius: 8px;
+    }}
+    #productAddPanel {{
+        background: #101B24;
+        border: 1px solid #263948;
+        border-radius: 8px;
+    }}
+    #productSearchShell {{
+        background: #0B141C;
+        border: 1px solid rgba(45, 226, 230, 0.55);
+        border-radius: 6px;
+    }}
+    #sectionAccentTitle {{
+        color: {CYAN};
+        font-size: 13px;
+        font-weight: 700;
+    }}
+    #productResult,
+    #productResultActive {{
+        color: #DDEAF2;
+        background: #0F1B24;
+        border: 1px solid #263948;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 600;
+        text-align: left;
+        padding: 10px 12px;
+    }}
+    #productResultActive {{
+        background: #122632;
+        border-color: rgba(45, 226, 230, 0.60);
+    }}
+    #productResult:hover,
+    #productResultActive:hover {{
+        background: #173242;
+        border-color: rgba(50, 246, 166, 0.70);
+    }}
+    #scannerHint {{
+        background: rgba(11, 18, 25, 0.55);
+        border-radius: 6px;
+    }}
+    #productInput,
+    #productInputAccent {{
+        color: #F4FAFF;
+        font-size: 14px;
+        padding: 0 12px;
+        selection-background-color: {CYAN};
+        selection-color: #061116;
+    }}
+    #productInput[accentText="true"],
+    #productInputAccent {{
+        color: {MINT};
+        font-weight: 700;
+    }}
+    #productInput[strongText="true"] {{
+        color: #F4FAFF;
+        font-weight: 700;
+    }}
+    #brandSelectInput {{
+        background: #0B141C;
+        border: 1px solid rgba(45, 226, 230, 0.55);
+        border-radius: 6px;
+    }}
+    #brandSelectLineEdit {{
+        color: #F4FAFF;
+        background: transparent;
+        border: none;
+        font-size: 14px;
+        selection-background-color: {CYAN};
+        selection-color: #061116;
+    }}
+    #brandSelectDropdown {{
+        background: #0B1219;
+        border: 1px solid #263948;
+        border-radius: 8px;
+    }}
+    #brandSuggestion,
+    #brandSuggestionActive,
+    #brandCreateSuggestion {{
+        border-bottom: 1px solid #263948;
+        border-radius: 0;
+    }}
+    #brandSuggestion {{
+        color: #DDEAF2;
+        background: #0F1B24;
+        font-weight: 500;
+    }}
+    #brandSuggestionActive {{
+        color: #F4FAFF;
+        background: #122632;
+        font-weight: 700;
+    }}
+    #brandSuggestion:hover,
+    #brandSuggestionActive:hover {{
+        background: #173242;
+    }}
+    #brandCreateSuggestion {{
+        color: {CYAN};
+        background: #102822;
+        font-weight: 700;
+    }}
+    #brandCreateSuggestion:hover {{
+        background: #12362D;
+    }}
+    #brandSuggestionText {{
+        color: #F4FAFF;
+        font-size: 14px;
+    }}
+    #brandSuggestionScore,
+    #brandSuggestionScoreActive {{
+        color: #8FA8B9;
+        font-size: 12px;
+        font-weight: 700;
+    }}
+    #brandSuggestionScoreActive {{
+        color: {MINT};
+    }}
+    #productSecondaryAction {{
+        color: #F4FAFF;
+        font-size: 13px;
+        font-weight: 700;
+        background: #132531;
+        border: 1px solid rgba(45, 226, 230, 0.65);
+        border-radius: 6px;
+    }}
+    #productSecondaryAction:hover {{
+        background: #173242;
+        border-color: rgba(50, 246, 166, 0.75);
+    }}
+    #primaryAction:disabled,
+    #productSecondaryAction:disabled {{
+        color: #6F8493;
+        background: #10202A;
+        border: 1px solid #263948;
     }}
     #productsTable {{
         background: #0F1B24;
