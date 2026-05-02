@@ -1,3 +1,4 @@
+from dataclasses import replace
 from difflib import SequenceMatcher
 
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
@@ -18,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from smartparts.session import AppSession
+from smartparts.session import AppSession, Counterparty
 from smartparts.theme import CYAN, MINT, RED
 from smartparts.ui.icons import IconWidget
 from smartparts.ui.styles import order_creation_stylesheet
@@ -262,6 +263,261 @@ class BrandSelect(QWidget):
         return False
 
 
+class CounterpartyOptionRow(QFrame):
+    clicked = Signal()
+
+    def __init__(self, title: str, subtitle: str, icon: str, object_name: str) -> None:
+        super().__init__()
+        self.setObjectName(object_name)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(46 if object_name == "counterpartyCreateSuggestion" else 60)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 12, 0)
+        layout.setSpacing(10)
+        layout.addWidget(IconWidget(icon, MINT if object_name == "counterpartySuggestionActive" else CYAN if object_name == "counterpartyCreateSuggestion" else "#8FA8B9", 16))
+
+        text = QFrame()
+        text_layout = QVBoxLayout(text)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("counterpartySuggestionTitle")
+        title_label.setTextInteractionFlags(Qt.NoTextInteraction)
+        text_layout.addWidget(title_label)
+
+        if subtitle:
+            subtitle_label = QLabel(subtitle)
+            subtitle_label.setObjectName("counterpartySuggestionSubtitle")
+            subtitle_label.setTextInteractionFlags(Qt.NoTextInteraction)
+            text_layout.addWidget(subtitle_label)
+
+        layout.addWidget(text, 1)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt API naming
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class CounterpartySelect(QWidget):
+    text_changed = Signal(str)
+    create_requested = Signal(str)
+
+    def __init__(self, counterparties: list[Counterparty], popup_parent: QWidget, value: str = "") -> None:
+        super().__init__()
+        self._counterparties = sorted(counterparties, key=lambda item: item.name.casefold())
+        self._popup_parent = popup_parent
+        self._committed_value = value
+        self._is_applying_text = False
+        self._has_pending_edit = False
+        self._suggestions: list[tuple[Counterparty, int]] = []
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        label = QLabel("Клиент из МойСклад")
+        label.setObjectName("fieldLabel")
+        layout.addWidget(label)
+
+        shell = QFrame()
+        shell.setObjectName("counterpartySelectInput")
+        shell.setFixedHeight(34)
+        shell_layout = QHBoxLayout(shell)
+        shell_layout.setContentsMargins(12, 0, 12, 0)
+        shell_layout.setSpacing(10)
+        shell_layout.addWidget(IconWidget("search", CYAN, 16))
+
+        self._line_edit = QLineEdit(value)
+        self._line_edit.setObjectName("counterpartySelectLineEdit")
+        self._line_edit.setFrame(False)
+        self._line_edit.setPlaceholderText("ФИО, телефон или название")
+        self._line_edit.setToolTip(value)
+        self._line_edit.installEventFilter(self)
+        self._line_edit.textEdited.connect(self._handle_text_edited)
+        shell_layout.addWidget(self._line_edit, 1)
+        shell_layout.addWidget(IconWidget("chevron-down", "#8FA8B9", 14))
+        layout.addWidget(shell)
+
+        self._dropdown = QFrame(popup_parent)
+        self._dropdown.setObjectName("counterpartySelectDropdown")
+        self._dropdown_layout = QVBoxLayout(self._dropdown)
+        self._dropdown_layout.setContentsMargins(0, 0, 0, 0)
+        self._dropdown_layout.setSpacing(0)
+        self._dropdown.hide()
+
+    def text(self) -> str:
+        return self._line_edit.text()
+
+    def setText(self, value: str) -> None:  # noqa: N802 - mirrors QLineEdit API
+        self._commit_value(value)
+
+    def clear(self) -> None:
+        self.setText("")
+
+    def hide_dropdown(self) -> None:
+        self._dropdown.hide()
+
+    def add_counterparty(self, counterparty: Counterparty) -> None:
+        self._counterparties = sorted([*self._counterparties, counterparty], key=lambda item: item.name.casefold())
+        self.setText(counterparty.name)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt API naming
+        if watched is self._line_edit and event.type() == QEvent.KeyPress:
+            key = event.key()
+            if key in (Qt.Key_Return, Qt.Key_Enter):
+                self._accept_enter()
+                return True
+            if key == Qt.Key_Escape:
+                self._reset_pending_edit()
+                return True
+        if watched is self._line_edit and event.type() in (QEvent.FocusIn, QEvent.MouseButtonPress):
+            QTimer.singleShot(0, self._show_available_counterparties)
+        if watched is self._line_edit and event.type() == QEvent.FocusOut:
+            QTimer.singleShot(120, self._reset_if_focus_left)
+        return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API naming
+        if self._dropdown.isVisible():
+            self._position_dropdown()
+        super().resizeEvent(event)
+
+    def _handle_text_edited(self, query: str) -> None:
+        if self._is_applying_text:
+            return
+        self._line_edit.setToolTip(query)
+        self._has_pending_edit = True
+        self._suggestions = self._closest_counterparties(query)
+        self._render_dropdown(query, allow_empty=True)
+
+    def _closest_counterparties(self, query: str) -> list[tuple[Counterparty, int]]:
+        normalized_query = query.strip().casefold()
+        if not normalized_query:
+            return [(counterparty, 100) for counterparty in self._counterparties[:5]]
+
+        ranked: list[tuple[int, str, Counterparty]] = []
+        for counterparty in self._counterparties:
+            searchable = " ".join((counterparty.name, counterparty.phone, counterparty.comment)).casefold()
+            normalized_name = counterparty.name.casefold()
+            score = int(SequenceMatcher(None, normalized_query, searchable).ratio() * 100)
+            if normalized_name == normalized_query:
+                score = 100
+            elif normalized_name.startswith(normalized_query):
+                score += 35
+            elif normalized_query in searchable:
+                score += 20
+            ranked.append((100 if normalized_name == normalized_query else min(score, 99), counterparty.name, counterparty))
+
+        ranked.sort(key=lambda item: (-item[0], item[1].casefold()))
+        return [(counterparty, score) for score, _, counterparty in ranked[:5]]
+
+    def _render_dropdown(self, query: str, *, allow_empty: bool = False) -> None:
+        typed_value = query.strip()
+        self._clear_dropdown_rows()
+        if not typed_value and not allow_empty:
+            self._dropdown.hide()
+            return
+
+        for index, (counterparty, _) in enumerate(self._suggestions):
+            self._dropdown_layout.addWidget(self._suggestion_button(counterparty, index == 0))
+
+        if typed_value and not self._has_exact_counterparty(typed_value):
+            self._dropdown_layout.addWidget(self._create_button(typed_value))
+
+        if self._dropdown_layout.count() == 0:
+            self._dropdown.hide()
+            return
+
+        self._position_dropdown()
+        self._dropdown.show()
+        self._dropdown.raise_()
+
+    def _show_available_counterparties(self) -> None:
+        if self._line_edit.text().strip():
+            self._suggestions = self._closest_counterparties(self._line_edit.text())
+            self._render_dropdown(self._line_edit.text(), allow_empty=True)
+            return
+
+        self._suggestions = self._closest_counterparties("")
+        self._render_dropdown("", allow_empty=True)
+
+    def _suggestion_button(self, counterparty: Counterparty, active: bool) -> CounterpartyOptionRow:
+        subtitle = counterparty.phone or counterparty.comment
+        if counterparty.comment and counterparty.phone:
+            subtitle = f"{counterparty.phone} · {counterparty.comment}"
+        row = CounterpartyOptionRow(counterparty.name, subtitle, "check" if active else "search", "counterpartySuggestionActive" if active else "counterpartySuggestion")
+        row.clicked.connect(lambda: self._commit_value(counterparty.name))
+        return row
+
+    def _create_button(self, typed_value: str) -> CounterpartyOptionRow:
+        row = CounterpartyOptionRow(f"Добавить контрагента: \"{typed_value}\"", "", "plus", "counterpartyCreateSuggestion")
+        row.clicked.connect(lambda: self._request_create(typed_value))
+        return row
+
+    def _request_create(self, typed_value: str) -> None:
+        self._dropdown.hide()
+        self.create_requested.emit(typed_value)
+
+    def _accept_enter(self) -> None:
+        typed_value = self._line_edit.text().strip()
+        if not typed_value:
+            self._reset_pending_edit()
+            return
+        if self._suggestions:
+            self._commit_value(self._suggestions[0][0].name)
+        else:
+            self._request_create(typed_value)
+
+    def _commit_value(self, value: str) -> None:
+        self._is_applying_text = True
+        self._line_edit.setText(value)
+        self._line_edit.setToolTip(value)
+        self._is_applying_text = False
+        self.text_changed.emit(value)
+        self._committed_value = value
+        self._has_pending_edit = False
+        self._dropdown.hide()
+
+    def _reset_if_focus_left(self) -> None:
+        focus_widget = QApplication.focusWidget()
+        if focus_widget is not None and self._is_dropdown_child(focus_widget):
+            return
+        if self._has_pending_edit:
+            self._reset_pending_edit()
+
+    def _reset_pending_edit(self) -> None:
+        self._commit_value(self._committed_value)
+
+    def _has_exact_counterparty(self, value: str) -> bool:
+        normalized_value = value.casefold()
+        return any(counterparty.name.casefold() == normalized_value for counterparty in self._counterparties)
+
+    def _position_dropdown(self) -> None:
+        position = self.mapTo(self._popup_parent, QPoint(0, self.height() + 4))
+        has_create_row = bool(self._line_edit.text().strip()) and not self._has_exact_counterparty(self._line_edit.text().strip())
+        height = (len(self._suggestions) * 60) + (46 if has_create_row else 0)
+        self._dropdown.setGeometry(position.x(), position.y(), self.width(), height)
+
+    def _clear_dropdown_rows(self) -> None:
+        while self._dropdown_layout.count():
+            item = self._dropdown_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _is_dropdown_child(self, widget: QWidget) -> bool:
+        current: QWidget | None = widget
+        while current is not None:
+            if current is self._dropdown:
+                return True
+            current = current.parentWidget()
+        return False
+
+
 class OrderCreationCanvas(QWidget):
     logout_requested = Signal()
     return_to_dashboard_requested = Signal()
@@ -270,6 +526,13 @@ class OrderCreationCanvas(QWidget):
         super().__init__()
         self.session = session
         self._brand_names = [brand.name for brand in self.session.brands]
+        self._client_counterparties = [counterparty for counterparty in self.session.counterparties if self._is_client_counterparty(counterparty)]
+        counterparty_groups = sorted({counterparty.group or "<empty>" for counterparty in self.session.counterparties}, key=str.casefold)
+        print(
+            f"Order client counterparties: {len(self._client_counterparties)} of {len(self.session.counterparties)}",
+            flush=True,
+        )
+        print(f"MoySklad counterparty groups: {counterparty_groups[:20]}", flush=True)
         self._document_type_buttons: dict[str, QPushButton] = {}
         self._selected_document_type = "order"
         self._updating_table = False
@@ -297,6 +560,9 @@ class OrderCreationCanvas(QWidget):
         self._product_overlay = self._product_add_overlay()
         self._product_overlay.setParent(self)
         self._product_overlay.hide()
+        self._counterparty_overlay = self._counterparty_add_overlay()
+        self._counterparty_overlay.setParent(self)
+        self._counterparty_overlay.hide()
 
     def _sidebar(self) -> QFrame:
         sidebar = QFrame()
@@ -458,7 +724,14 @@ class OrderCreationCanvas(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         layout.addWidget(self._document_type(), 0)
-        client_panel, self._client_input = self._field_input_panel("Клиент из МойСклад", "ООО АвтоМаркет Север", "search")
+        client_panel = QFrame()
+        client_panel.setObjectName("formPanel")
+        client_panel_layout = QVBoxLayout(client_panel)
+        client_panel_layout.setContentsMargins(14, 14, 14, 14)
+        client_panel_layout.setSpacing(0)
+        self._client_input = CounterpartySelect(self._client_counterparties, self, "")
+        self._client_input.create_requested.connect(self._show_counterparty_overlay)
+        client_panel_layout.addWidget(self._client_input)
         layout.addWidget(client_panel, 1)
         layout.addWidget(self._warehouse_panel(), 0)
         prepayment_panel, self._prepayment_input = self._field_input_panel("Предоплата", "", None, fixed_width=150, bold=True)
@@ -578,6 +851,122 @@ class OrderCreationCanvas(QWidget):
         row.addWidget(text, 1)
         layout.addWidget(shell)
         return panel
+
+    def _counterparty_add_overlay(self) -> QFrame:
+        overlay = QFrame(self)
+        overlay.setObjectName("productOverlay")
+
+        outer = QVBoxLayout(overlay)
+        outer.setContentsMargins(32, 32, 32, 32)
+        outer.setSpacing(0)
+        outer.addStretch(1)
+
+        center = QHBoxLayout()
+        center.setContentsMargins(0, 0, 0, 0)
+        center.addStretch(1)
+
+        window = QFrame()
+        self._counterparty_add_window = window
+        window.setObjectName("counterpartyAddWindow")
+        window.setFixedSize(560, 460)
+
+        layout = QVBoxLayout(window)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(16)
+        layout.addWidget(self._counterparty_add_header())
+
+        form = QFrame()
+        form_layout = QVBoxLayout(form)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(14)
+        self._counterparty_name_input = self._product_input(form_layout, "ФИО", "")
+        self._counterparty_name_input.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self._counterparty_phone_input = self._product_input(form_layout, "Номер телефона", "")
+        self._counterparty_phone_input.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        cars_title = QLabel("Автомобили")
+        cars_title.setObjectName("panelTitle")
+        cars_title.setStyleSheet("font-size: 15px;")
+        form_layout.addWidget(cars_title)
+
+        cars_hint = QLabel("По умолчанию в блоке только действие добавления авто.")
+        cars_hint.setObjectName("hintText")
+        form_layout.addWidget(cars_hint)
+
+        add_car = QPushButton("Добавить авто")
+        add_car.setObjectName("counterpartyAddCarButton")
+        add_car.setIcon(IconWidget.to_icon("plus", CYAN, 16))
+        add_car.setIconSize(QSize(16, 16))
+        add_car.setCursor(Qt.PointingHandCursor)
+        add_car.setFixedHeight(44)
+        form_layout.addWidget(add_car)
+
+        layout.addWidget(form)
+        layout.addStretch(1)
+
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet("background: #263948;")
+        layout.addWidget(divider)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(10)
+        actions.addStretch(1)
+
+        cancel = QPushButton("Отмена")
+        cancel.setObjectName("secondaryAction")
+        cancel.setCursor(Qt.PointingHandCursor)
+        cancel.setFixedSize(112, 42)
+        cancel.clicked.connect(self._hide_counterparty_overlay)
+        actions.addWidget(cancel)
+
+        save = QPushButton("Сохранить")
+        save.setObjectName("primaryAction")
+        save.setIcon(IconWidget.to_icon("check", "#061116", 16))
+        save.setIconSize(QSize(16, 16))
+        save.setCursor(Qt.PointingHandCursor)
+        save.setFixedSize(120, 42)
+        save.clicked.connect(self._save_counterparty_from_dialog)
+        actions.addWidget(save)
+
+        layout.addLayout(actions)
+        center.addWidget(window)
+        center.addStretch(1)
+        outer.addLayout(center)
+        outer.addStretch(1)
+        return overlay
+
+    def _counterparty_add_header(self) -> QFrame:
+        header = QFrame()
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        text = QFrame()
+        text_layout = QVBoxLayout(text)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(5)
+
+        title = QLabel("Добавление контрагента")
+        title.setObjectName("pageTitle")
+        title.setStyleSheet("font-size: 22px;")
+        subtitle = QLabel("Создайте клиента и привяжите автомобили для быстрого оформления заказов.")
+        subtitle.setObjectName("pageSubtitle")
+        subtitle.setWordWrap(True)
+        text_layout.addWidget(title)
+        text_layout.addWidget(subtitle)
+
+        close = QPushButton()
+        close.setObjectName("dialogCloseButton")
+        close.setIcon(IconWidget.to_icon("x", "#8FA8B9", 16))
+        close.setIconSize(QSize(16, 16))
+        close.setCursor(Qt.PointingHandCursor)
+        close.setFixedSize(28, 28)
+        close.clicked.connect(self._hide_counterparty_overlay)
+
+        layout.addWidget(text, 1)
+        layout.addWidget(close, 0, Qt.AlignTop)
+        return header
 
     def _content(self) -> QFrame:
         content = QFrame()
@@ -935,6 +1324,36 @@ class OrderCreationCanvas(QWidget):
         self._brand_input.hide_dropdown()
         self._product_overlay.hide()
 
+    def _show_counterparty_overlay(self, name: str = "") -> None:
+        self._client_input.hide_dropdown()
+        self._counterparty_name_input.setText(name.strip())
+        self._counterparty_phone_input.clear()
+        self._position_counterparty_overlay()
+        self._counterparty_overlay.show()
+        self._counterparty_overlay.raise_()
+        self._counterparty_name_input.setFocus()
+        self._counterparty_name_input.selectAll()
+
+    def _hide_counterparty_overlay(self) -> None:
+        self._counterparty_overlay.hide()
+
+    def _save_counterparty_from_dialog(self) -> None:
+        name = self._counterparty_name_input.text().strip()
+        if not name:
+            self._counterparty_name_input.setFocus()
+            return
+
+        counterparty = Counterparty(
+            id="",
+            name=name,
+            phone=self._counterparty_phone_input.text().strip(),
+            group="Клиенты",
+        )
+        self._client_counterparties.append(counterparty)
+        self.session = replace(self.session, counterparties=(*self.session.counterparties, counterparty))
+        self._client_input.add_counterparty(counterparty)
+        self._hide_counterparty_overlay()
+
     def _fill_product_from_search(self) -> None:
         query = self._product_search_input.text().strip().upper()
         if "OF" in query:
@@ -1073,6 +1492,16 @@ class OrderCreationCanvas(QWidget):
         self._warehouse_select.setCurrentIndex(0)
         self._update_totals()
 
+    @staticmethod
+    def _is_client_counterparty(counterparty: Counterparty) -> bool:
+        group = counterparty.group.strip().casefold()
+        if not group:
+            return True
+
+        client_group_name = "\u043a\u043b\u0438\u0435\u043d\u0442\u044b"
+        group_parts = [part.strip() for part in group.replace(",", ";").split(";") if part.strip()]
+        return any(part == client_group_name or part.rsplit("/", 1)[-1] == client_group_name for part in group_parts)
+
     def _update_totals(self) -> None:
         if not hasattr(self, "_products_table_widget") or not hasattr(self, "_total_positions_value"):
             return
@@ -1105,6 +1534,9 @@ class OrderCreationCanvas(QWidget):
         width = max(760, min(self.width() - 80, 1060))
         height = max(500, min(self.height() - 64, 660))
         self._product_add_window.setFixedSize(width, height)
+
+    def _position_counterparty_overlay(self) -> None:
+        self._counterparty_overlay.setGeometry(self.rect())
 
     @staticmethod
     def _delete_row_button(table: QTableWidget, after_remove: object | None = None) -> QFrame:
@@ -1229,5 +1661,7 @@ class OrderCreationCanvas(QWidget):
         self._workspace_layout.setContentsMargins(margin, 24 if compact else 28, margin, 24 if compact else 28)
         if self._product_overlay.isVisible():
             self._position_product_overlay()
+        if self._counterparty_overlay.isVisible():
+            self._position_counterparty_overlay()
         super().resizeEvent(event)
         QTimer.singleShot(0, self._resize_product_table_columns)

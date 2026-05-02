@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import quote, urlencode
 
-from smartparts.session import AppSession, Brand
+from smartparts.session import AppSession, Brand, Counterparty
 
 
 API_BASE_URL = "https://api.moysklad.ru/api/remap/1.2"
@@ -15,6 +15,7 @@ EMPLOYEE_CONTEXT_URL = f"{API_BASE_URL}/context/employee"
 EMPLOYEE_URL = f"{API_BASE_URL}/entity/employee"
 CUSTOM_ENTITY_URL = f"{API_BASE_URL}/entity/customentity"
 PRODUCT_URL = f"{API_BASE_URL}/entity/product"
+COUNTERPARTY_URL = f"{API_BASE_URL}/entity/counterparty"
 BRANDS_DICTIONARY_NAME = "Бренды"
 BRAND_ATTRIBUTE_NAMES = ("Бренд", "Бренды")
 REQUEST_TIMEOUT_SECONDS = 15
@@ -44,6 +45,10 @@ def authenticate(login: str, password: str) -> AppSession:
 
 def load_brands(access_token: str) -> tuple[Brand, ...]:
     return _request_brands(access_token)
+
+
+def load_counterparties(access_token: str) -> tuple[Counterparty, ...]:
+    return _request_counterparties(access_token)
 
 
 def _request_token(login: str, password: str) -> str:
@@ -151,6 +156,28 @@ def _request_brand_dictionary_ids(token: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(dictionary_ids))
 
 
+def _request_counterparties(token: str) -> tuple[Counterparty, ...]:
+    counterparties: list[Counterparty] = []
+    offset = 0
+    while True:
+        query = urlencode({"limit": PAGE_LIMIT, "offset": offset, "expand": "group"})
+        payload = _open_json(_bearer_request(f"{COUNTERPARTY_URL}?{query}", token))
+        rows = payload.get("rows")
+        if not isinstance(rows, list):
+            raise MoySkladAuthError("MoySklad returned an invalid counterparties list.")
+
+        counterparties.extend(_extract_counterparty(row) for row in rows if isinstance(row, dict))
+
+        meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+        size = meta.get("size")
+        limit = meta.get("limit", PAGE_LIMIT)
+        offset = meta.get("offset", offset) + limit
+        if not isinstance(size, int) or not isinstance(limit, int) or offset >= size:
+            break
+
+    return tuple(counterparties)
+
+
 def _find_custom_entity_ids_in_entity_rows(token: str, entity_url: str, attribute_names: tuple[str, ...]) -> tuple[str, ...]:
     query = urlencode({"limit": 100, "offset": 0, "expand": "attributes.value"})
     try:
@@ -239,6 +266,40 @@ def _extract_brand(payload: dict) -> Brand:
         code=_extract_string(payload, "code"),
         external_code=_extract_string(payload, "externalCode"),
     )
+
+
+def _extract_counterparty(payload: dict) -> Counterparty:
+    return Counterparty(
+        id=_extract_string(payload, "id"),
+        name=_extract_string(payload, "name"),
+        phone=_extract_string(payload, "phone"),
+        group=_extract_group_name(payload),
+        comment=_extract_string(payload, "description"),
+    )
+
+
+def _extract_group_name(payload: dict) -> str:
+    names: list[str] = []
+
+    group = payload.get("group")
+    if isinstance(group, str) and group.strip():
+        names.append(group.strip())
+    elif isinstance(group, dict):
+        name = _extract_named_value(group)
+        if name:
+            names.append(name)
+
+    tags = payload.get("tags")
+    if isinstance(tags, list):
+        for tag in tags:
+            if isinstance(tag, str) and tag.strip():
+                names.append(tag.strip())
+            elif isinstance(tag, dict):
+                tag_name = _extract_named_value(tag)
+                if tag_name:
+                    names.append(tag_name)
+
+    return "; ".join(dict.fromkeys(names))
 
 
 def _bearer_request(url: str, token: str) -> urllib.request.Request:

@@ -501,7 +501,20 @@ def order_creation_stylesheet() -> str:
         border: 1px solid rgba(45, 226, 230, 0.55);
         border-radius: 6px;
     }}
+    #counterpartySelectInput {{
+        background: #0B141C;
+        border: 1px solid rgba(45, 226, 230, 0.55);
+        border-radius: 6px;
+    }}
     #brandSelectLineEdit {{
+        color: #F4FAFF;
+        background: transparent;
+        border: none;
+        font-size: 14px;
+        selection-background-color: {CYAN};
+        selection-color: #061116;
+    }}
+    #counterpartySelectLineEdit {{
         color: #F4FAFF;
         background: transparent;
         border: none;
@@ -514,6 +527,11 @@ def order_creation_stylesheet() -> str:
         font-weight: 700;
     }}
     #brandSelectDropdown {{
+        background: #0B1219;
+        border: 1px solid #263948;
+        border-radius: 8px;
+    }}
+    #counterpartySelectDropdown {{
         background: #0B1219;
         border: 1px solid #263948;
         border-radius: 8px;
@@ -546,9 +564,43 @@ def order_creation_stylesheet() -> str:
     #brandCreateSuggestion:hover {{
         background: #12362D;
     }}
+    #counterpartySuggestion,
+    #counterpartySuggestionActive,
+    #counterpartyCreateSuggestion {{
+        border-bottom: 1px solid #263948;
+        border-radius: 0;
+    }}
+    #counterpartySuggestion {{
+        background: #0F1B24;
+    }}
+    #counterpartySuggestionActive {{
+        background: #122632;
+    }}
+    #counterpartySuggestion:hover,
+    #counterpartySuggestionActive:hover {{
+        background: #173242;
+    }}
+    #counterpartyCreateSuggestion {{
+        color: {CYAN};
+        background: #102822;
+        font-weight: 700;
+    }}
+    #counterpartyCreateSuggestion:hover {{
+        background: #12362D;
+    }}
     #brandSuggestionText {{
         color: #F4FAFF;
         font-size: 14px;
+    }}
+    #counterpartySuggestionTitle {{
+        color: #F4FAFF;
+        font-size: 13px;
+        font-weight: 700;
+    }}
+    #counterpartySuggestionSubtitle {{
+        color: #8FA8B9;
+        font-size: 12px;
+        font-weight: 600;
     }}
     #brandSuggestionScore,
     #brandSuggestionScoreActive {{
@@ -570,6 +622,31 @@ def order_creation_stylesheet() -> str:
     #productSecondaryAction:hover {{
         background: #173242;
         border-color: rgba(50, 246, 166, 0.75);
+    }}
+    #counterpartyAddWindow {{
+        background: #111A23;
+        border: 1px solid #263948;
+        border-radius: 8px;
+    }}
+    #counterpartyAddCarButton {{
+        color: {CYAN};
+        font-size: 13px;
+        font-weight: 700;
+        background: #0B141C;
+        border: 1px solid rgba(45, 226, 230, 0.75);
+        border-radius: 6px;
+    }}
+    #counterpartyAddCarButton:hover {{
+        background: #102832;
+        border-color: rgba(50, 246, 166, 0.85);
+    }}
+    #dialogCloseButton {{
+        background: transparent;
+        border: none;
+        border-radius: 4px;
+    }}
+    #dialogCloseButton:hover {{
+        background: #173242;
     }}
     #primaryAction:disabled,
     #productSecondaryAction:disabled {{

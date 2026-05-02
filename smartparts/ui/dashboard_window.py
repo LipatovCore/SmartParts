@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from smartparts.session import AppSession
-from smartparts.services.moysklad import load_brands
+from smartparts.services.moysklad import load_brands, load_counterparties
 from smartparts.theme import CYAN, MINT, RED, WINDOW_HEIGHT, WINDOW_WIDTH
 from smartparts.ui.icons import IconWidget
 from smartparts.ui.order_creation_window import OrderCreationCanvas
@@ -42,6 +42,24 @@ class BrandLoaderWorker(QObject):
             self.finished.emit()
 
 
+class CounterpartyLoaderWorker(QObject):
+    succeeded = Signal(object)
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(self, access_token: str) -> None:
+        super().__init__()
+        self._access_token = access_token
+
+    def run(self) -> None:
+        try:
+            self.succeeded.emit(load_counterparties(self._access_token))
+        except Exception as error:
+            self.failed.emit(str(error))
+        finally:
+            self.finished.emit()
+
+
 class DashboardWindow(QMainWindow):
     logout_requested = Signal()
 
@@ -53,14 +71,18 @@ class DashboardWindow(QMainWindow):
         self.setMinimumSize(820, 560)
         self._dashboard_canvas: DashboardCanvas | None = None
         self._brands_loading = True
+        self._counterparties_loading = True
         self._brand_loader_thread: QThread | None = None
         self._brand_loader_worker: BrandLoaderWorker | None = None
+        self._counterparty_loader_thread: QThread | None = None
+        self._counterparty_loader_worker: CounterpartyLoaderWorker | None = None
         self._fullscreen_shortcut = QShortcut(QKeySequence("F11"), self)
         self._fullscreen_shortcut.activated.connect(self._toggle_fullscreen)
         self._exit_fullscreen_shortcut = QShortcut(QKeySequence("Esc"), self)
         self._exit_fullscreen_shortcut.activated.connect(self._exit_fullscreen)
         self._show_dashboard()
         QTimer.singleShot(0, self._load_brands)
+        QTimer.singleShot(0, self._load_counterparties)
 
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():
@@ -74,7 +96,7 @@ class DashboardWindow(QMainWindow):
 
     def _show_dashboard(self) -> None:
         self.setWindowTitle("SmartParts - Рабочий стол")
-        canvas = DashboardCanvas(self.session, self._brands_loading)
+        canvas = DashboardCanvas(self.session, self._reference_data_loading())
         self._dashboard_canvas = canvas
         canvas.logout_requested.connect(self.logout_requested.emit)
         canvas.create_order_requested.connect(self._show_order_creation)
@@ -94,7 +116,7 @@ class DashboardWindow(QMainWindow):
 
         self._brands_loading = True
         if self._dashboard_canvas is not None:
-            self._dashboard_canvas.set_brands_loading(True)
+            self._dashboard_canvas.set_reference_data_loading(True)
 
         self._brand_loader_thread = QThread(self)
         self._brand_loader_worker = BrandLoaderWorker(self.session.access_token)
@@ -113,17 +135,59 @@ class DashboardWindow(QMainWindow):
         self._brands_loading = False
         if self._dashboard_canvas is not None:
             self._dashboard_canvas.set_session(self.session)
-            self._dashboard_canvas.set_brands_loading(False)
+            self._dashboard_canvas.set_reference_data_loading(self._reference_data_loading())
 
     def _handle_brand_load_error(self, message: str) -> None:
         print(f"Failed to load MoySklad brands: {message}", flush=True)
         self._brands_loading = False
         if self._dashboard_canvas is not None:
-            self._dashboard_canvas.set_brands_loading(False)
+            self._dashboard_canvas.set_reference_data_loading(self._reference_data_loading())
 
     def _clear_brand_loader(self) -> None:
         self._brand_loader_thread = None
         self._brand_loader_worker = None
+
+    def _load_counterparties(self) -> None:
+        if self._counterparty_loader_thread is not None:
+            return
+
+        self._counterparties_loading = True
+        if self._dashboard_canvas is not None:
+            self._dashboard_canvas.set_reference_data_loading(True)
+
+        self._counterparty_loader_thread = QThread(self)
+        self._counterparty_loader_worker = CounterpartyLoaderWorker(self.session.access_token)
+        self._counterparty_loader_worker.moveToThread(self._counterparty_loader_thread)
+        self._counterparty_loader_thread.started.connect(self._counterparty_loader_worker.run)
+        self._counterparty_loader_worker.succeeded.connect(self._apply_loaded_counterparties)
+        self._counterparty_loader_worker.failed.connect(self._handle_counterparty_load_error)
+        self._counterparty_loader_worker.finished.connect(self._counterparty_loader_thread.quit)
+        self._counterparty_loader_worker.finished.connect(self._counterparty_loader_worker.deleteLater)
+        self._counterparty_loader_thread.finished.connect(self._counterparty_loader_thread.deleteLater)
+        self._counterparty_loader_thread.finished.connect(self._clear_counterparty_loader)
+        self._counterparty_loader_thread.start()
+
+    def _apply_loaded_counterparties(self, counterparties: object) -> None:
+        loaded_counterparties = tuple(counterparties)
+        print(f"Loaded MoySklad counterparties: {len(loaded_counterparties)}", flush=True)
+        self.session = replace(self.session, counterparties=loaded_counterparties)
+        self._counterparties_loading = False
+        if self._dashboard_canvas is not None:
+            self._dashboard_canvas.set_session(self.session)
+            self._dashboard_canvas.set_reference_data_loading(self._reference_data_loading())
+
+    def _handle_counterparty_load_error(self, message: str) -> None:
+        print(f"Failed to load MoySklad counterparties: {message}", flush=True)
+        self._counterparties_loading = False
+        if self._dashboard_canvas is not None:
+            self._dashboard_canvas.set_reference_data_loading(self._reference_data_loading())
+
+    def _clear_counterparty_loader(self) -> None:
+        self._counterparty_loader_thread = None
+        self._counterparty_loader_worker = None
+
+    def _reference_data_loading(self) -> bool:
+        return self._brands_loading or self._counterparties_loading
 
 
 class SpinningLoaderIcon(QWidget):
@@ -157,7 +221,7 @@ class DashboardCanvas(QWidget):
         super().__init__()
         self.session = session
         self._mode_buttons: list[QPushButton] = []
-        self._brands_loading = brands_loading
+        self._reference_data_loading = brands_loading
         self.setObjectName("dashboardCanvas")
         self.setStyleSheet(dashboard_stylesheet())
 
@@ -168,13 +232,13 @@ class DashboardCanvas(QWidget):
         self._workspace_widget = self._workspace()
         root.addWidget(self._sidebar_widget)
         root.addWidget(self._workspace_widget, 1)
-        self.set_brands_loading(brands_loading)
+        self.set_reference_data_loading(brands_loading)
 
     def set_session(self, session: AppSession) -> None:
         self.session = session
 
-    def set_brands_loading(self, loading: bool) -> None:
-        self._brands_loading = loading
+    def set_reference_data_loading(self, loading: bool) -> None:
+        self._reference_data_loading = loading
         self._brands_loading_status.setVisible(loading)
         for button in self._mode_buttons:
             button.setEnabled(not loading)
@@ -232,11 +296,11 @@ class DashboardCanvas(QWidget):
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(4)
 
-        title = QLabel("Загрузка брендов")
+        title = QLabel("Загрузка справочников")
         title.setObjectName("brandsLoadingTitle")
         text_layout.addWidget(title)
 
-        subtitle = QLabel("Справочник брендов")
+        subtitle = QLabel("Бренды и контрагенты")
         subtitle.setObjectName("brandsLoadingSubtitle")
         text_layout.addWidget(subtitle)
 
