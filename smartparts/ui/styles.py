@@ -711,3 +711,154 @@ def order_creation_stylesheet() -> str:
         font-weight: 600;
     }}
     """
+
+
+def article_check_stylesheet() -> str:
+    return f"""
+    #articleCheckCanvas {{
+        background: transparent;
+        font-family: Arial;
+    }}
+    #sidebar {{
+        background: #0B1219;
+        border-right: 1px solid #263948;
+    }}
+    #mainWorkspace {{
+        background: #111A23;
+    }}
+    #brandAccent {{
+        border-radius: 2px;
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {CYAN}, stop:1 {MINT});
+    }}
+    #brandTitle,
+    #pageTitle {{
+        color: #F4FAFF;
+        font-weight: 700;
+    }}
+    #brandTitle {{
+        font-size: 28px;
+    }}
+    #pageTitle {{
+        font-size: 28px;
+    }}
+    #brandSubtitle,
+    #pageSubtitle,
+    #fieldLabel {{
+        color: #8FA8B9;
+    }}
+    #pageSubtitle {{
+        font-size: 14px;
+    }}
+    #fieldLabel {{
+        font-size: 12px;
+        font-weight: 700;
+    }}
+    #sessionTitle {{
+        color: {CYAN};
+        font-size: 13px;
+        font-weight: 700;
+    }}
+    #sessionCard {{
+        background: #0F1B24;
+        border: 1px solid #263948;
+        border-radius: 8px;
+    }}
+    #operatorText {{
+        color: #DDEAF2;
+        font-weight: 700;
+    }}
+    #sessionRoleText {{
+        color: #8FA8B9;
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    #logoutButton,
+    #backToDashboardButton {{
+        color: #DDEAF2;
+        font-size: 13px;
+        font-weight: 700;
+        background: #132531;
+        border: 1px solid rgba(45, 226, 230, 0.55);
+        border-radius: 6px;
+    }}
+    #logoutButton:hover,
+    #backToDashboardButton:hover {{
+        background: #173242;
+        border-color: rgba(50, 246, 166, 0.75);
+    }}
+    #articleSearchShell {{
+        background: #0B141C;
+        border: 1px solid rgba(45, 226, 230, 0.55);
+        border-radius: 6px;
+    }}
+    #articleSearchInput {{
+        color: #F4FAFF;
+        background: transparent;
+        border: none;
+        font-size: 14px;
+        selection-background-color: {CYAN};
+        selection-color: #061116;
+    }}
+    #primaryAction {{
+        color: #061116;
+        font-size: 14px;
+        font-weight: 700;
+        border: 1px solid #A9FFF0;
+        border-radius: 6px;
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {CYAN}, stop:1 {MINT});
+    }}
+    #primaryAction:hover {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5AF7FA, stop:1 #5DFFC0);
+    }}
+    #modeSwitcher {{
+        background: #101B24;
+        border: 1px solid #263948;
+        border-radius: 8px;
+    }}
+    #modeToggleActive {{
+        color: #F4FAFF;
+        font-size: 13px;
+        font-weight: 700;
+        background: #14313A;
+        border: 1px solid rgba(45, 226, 230, 0.40);
+        border-radius: 6px;
+    }}
+    #modeToggleInactive {{
+        color: #8FA8B9;
+        font-size: 13px;
+        font-weight: 700;
+        background: #0B1219;
+        border: 1px solid transparent;
+        border-radius: 6px;
+    }}
+    #modeToggleInactive:hover {{
+        color: #DDEAF2;
+        background: #10202A;
+        border-color: #263948;
+    }}
+    #articleResultsTable {{
+        color: #DDEAF2;
+        background: #0B1219;
+        alternate-background-color: #0F1B24;
+        border: 1px solid #263948;
+        border-radius: 8px;
+        gridline-color: #263948;
+        font-size: 12px;
+        selection-background-color: rgba(45, 226, 230, 0.18);
+        selection-color: #F4FAFF;
+    }}
+    #articleResultsTable::item {{
+        padding: 8px;
+        border-bottom: 1px solid #263948;
+    }}
+    QHeaderView::section {{
+        background: #132532;
+        color: #8FA8B9;
+        border: none;
+        border-right: 1px solid #263948;
+        border-bottom: 1px solid #263948;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 8px;
+    }}
+    """

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from smartparts.session import AppSession
 from smartparts.services.moysklad import load_brands, load_counterparties
 from smartparts.theme import CYAN, MINT, RED, WINDOW_HEIGHT, WINDOW_WIDTH
+from smartparts.ui.article_check_window import ArticleCheckCanvas
 from smartparts.ui.icons import IconWidget
 from smartparts.ui.order_creation_window import OrderCreationCanvas
 from smartparts.ui.styles import dashboard_stylesheet
@@ -100,12 +101,21 @@ class DashboardWindow(QMainWindow):
         self._dashboard_canvas = canvas
         canvas.logout_requested.connect(self.logout_requested.emit)
         canvas.create_order_requested.connect(self._show_order_creation)
+        canvas.article_check_requested.connect(self._show_article_check)
         self.setCentralWidget(canvas)
 
     def _show_order_creation(self) -> None:
         self.setWindowTitle("SmartParts - Создание заказа или поставки")
         self._dashboard_canvas = None
         canvas = OrderCreationCanvas(self.session)
+        canvas.logout_requested.connect(self.logout_requested.emit)
+        canvas.return_to_dashboard_requested.connect(self._show_dashboard)
+        self.setCentralWidget(canvas)
+
+    def _show_article_check(self) -> None:
+        self.setWindowTitle("SmartParts - Проверка артикула")
+        self._dashboard_canvas = None
+        canvas = ArticleCheckCanvas(self.session)
         canvas.logout_requested.connect(self.logout_requested.emit)
         canvas.return_to_dashboard_requested.connect(self._show_dashboard)
         self.setCentralWidget(canvas)
@@ -216,6 +226,7 @@ class SpinningLoaderIcon(QWidget):
 class DashboardCanvas(QWidget):
     logout_requested = Signal()
     create_order_requested = Signal()
+    article_check_requested = Signal()
 
     def __init__(self, session: AppSession, brands_loading: bool = False) -> None:
         super().__init__()
@@ -456,6 +467,8 @@ class DashboardCanvas(QWidget):
             self._mode_buttons.append(button)
             if primary:
                 button.clicked.connect(self.create_order_requested.emit)
+            elif action == "Проверить артикул":
+                button.clicked.connect(self.article_check_requested.emit)
             row.addWidget(card, 1)
         return row
 
