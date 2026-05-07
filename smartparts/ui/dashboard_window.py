@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from smartparts.config import get_app_version
 from smartparts.session import AppSession
 from smartparts.services.moysklad import load_brands, load_counterparties, load_warehouses
 from smartparts.theme import CYAN, MINT, RED, WINDOW_HEIGHT, WINDOW_WIDTH
@@ -303,6 +304,10 @@ class DashboardCanvas(QWidget):
         subtitle = QLabel("Рабочее место оператора")
         subtitle.setObjectName("brandSubtitle")
         layout.addWidget(subtitle)
+
+        version = QLabel(f"Версия {get_app_version()}")
+        version.setObjectName("appVersion")
+        layout.addWidget(version)
         return area
 
     def _brands_loading_card(self) -> QFrame:
@@ -475,7 +480,8 @@ class DashboardCanvas(QWidget):
         row = QHBoxLayout()
         row.setSpacing(18)
         for icon, color, title, description, action, action_icon, primary in cards:
-            card, button = self._mode_card(icon, color, title, description, action, action_icon, primary)
+            muted = icon in {"file-plus", "package-check", "shopping-bag"}
+            card, button = self._mode_card(icon, color, title, description, action, action_icon, primary, muted)
             self._mode_buttons.append(button)
             if primary:
                 button.clicked.connect(self.create_order_requested.emit)
@@ -493,9 +499,10 @@ class DashboardCanvas(QWidget):
         action: str,
         action_icon: str,
         primary: bool,
+        muted: bool = False,
     ) -> tuple[QFrame, QPushButton]:
         card = QFrame()
-        card.setObjectName("modeCardPrimary" if primary else ("modeCardAccent" if color == MINT else "modeCard"))
+        card.setObjectName("modeCardMuted" if muted else ("modeCardPrimary" if primary else ("modeCardAccent" if color == MINT else "modeCard")))
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         layout = QVBoxLayout(card)
@@ -506,7 +513,8 @@ class DashboardCanvas(QWidget):
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)
-        content_layout.addWidget(IconWidget(icon, color, 34))
+        accent_color = "#9AA7AF" if muted else color
+        content_layout.addWidget(IconWidget(icon, accent_color, 34))
 
         title_label = QLabel(title)
         title_label.setObjectName("cardTitle")
@@ -524,7 +532,8 @@ class DashboardCanvas(QWidget):
 
         button = QPushButton(action)
         button.setObjectName("primaryAction" if primary else "secondaryAction")
-        icon_color = "#061116" if primary else color
+        button.setProperty("mutedAction", muted)
+        icon_color = "#DDEAF2" if muted else ("#061116" if primary else color)
         button.setIcon(IconWidget.to_icon(action_icon, icon_color, 17))
         button.setIconSize(QSize(17, 17))
         button.setCursor(Qt.PointingHandCursor)

@@ -28,6 +28,11 @@ def login_stylesheet() -> str:
         font-size: 18px;
         line-height: 1.35;
     }}
+    #appVersion {{
+        color: #7F8D96;
+        font-size: 12px;
+        font-weight: 700;
+    }}
     #diag1 {{
         background: rgba(45, 226, 230, 0.20);
         border-radius: 1px;
@@ -125,10 +130,16 @@ def dashboard_stylesheet() -> str:
         font-weight: 700;
     }}
     #brandSubtitle,
+    #appVersion,
     #pageSubtitle,
     #cardDescription,
     #summarySubtitle {{
         color: #8FA8B9;
+    }}
+    #appVersion {{
+        color: #7F8D96;
+        font-size: 12px;
+        font-weight: 700;
     }}
     #sessionTitle {{
         color: {CYAN};
@@ -140,6 +151,10 @@ def dashboard_stylesheet() -> str:
         background: #0F1B24;
         border: 1px solid #263948;
         border-radius: 8px;
+    }}
+    #summaryPanel {{
+        background: #20252A;
+        border-color: #3A4248;
     }}
     #brandsLoadingStatus {{
         background: #101B24;
@@ -211,6 +226,11 @@ def dashboard_stylesheet() -> str:
         border: 1px solid rgba(50, 246, 166, 0.40);
         border-radius: 8px;
     }}
+    #modeCardMuted {{
+        background: #20252A;
+        border: 1px solid #3A4248;
+        border-radius: 8px;
+    }}
     #cardTitle,
     #summaryTitle {{
         color: #F4FAFF;
@@ -227,16 +247,27 @@ def dashboard_stylesheet() -> str:
     #primaryAction:hover {{
         background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5AF7FA, stop:1 #5DFFC0);
     }}
+    #secondaryAction {{
+        color: #DFFDF5;
+        font-size: 14px;
+        font-weight: 700;
+    }}
+    #primaryAction[mutedAction="true"],
+    #secondaryAction[mutedAction="true"] {{
+        color: #DDEAF2;
+        background: #2B3238;
+        border: 1px solid #4A535A;
+    }}
+    #primaryAction[mutedAction="true"]:hover,
+    #secondaryAction[mutedAction="true"]:hover {{
+        background: #343C43;
+        border-color: #68737C;
+    }}
     #primaryAction:disabled,
     #secondaryAction:disabled {{
         color: #6F8493;
         background: #10202A;
         border: 1px solid #263948;
-    }}
-    #secondaryAction {{
-        color: #DFFDF5;
-        font-size: 14px;
-        font-weight: 700;
     }}
     #taskItem {{
         background: #111F29;

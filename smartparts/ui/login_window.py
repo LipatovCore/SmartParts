@@ -2,6 +2,7 @@ from PySide6.QtCore import QObject, QPointF, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QKeySequence, QLinearGradient, QPainter, QPen, QBrush, QShortcut
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
+from smartparts.config import get_app_version
 from smartparts.services.moysklad import MoySkladAuthError, authenticate
 from smartparts.session import AppSession
 from smartparts.theme import CYAN, MINT, WINDOW_HEIGHT, WINDOW_WIDTH
@@ -191,8 +192,12 @@ class LoginCanvas(QWidget):
         subtitle.setObjectName("brandSubtitle")
         subtitle.setWordWrap(True)
 
+        version = QLabel(f"Версия {get_app_version()}")
+        version.setObjectName("appVersion")
+
         layout.addWidget(title)
         layout.addWidget(subtitle)
+        layout.addWidget(version)
         return layout
 
     @staticmethod
