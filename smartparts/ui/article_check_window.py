@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from smartparts.services.moysklad import ArticleLookupItem, ProductStockMatch, find_article_stock
 from smartparts.session import AppSession
-from smartparts.theme import CYAN, MINT
+from smartparts.theme import CYAN, MINT, RED
 from smartparts.ui.icons import IconWidget
 from smartparts.ui.styles import article_check_stylesheet
 
@@ -566,7 +566,7 @@ class ArticleCheckCanvas(QWidget):
             headers = ("Тип", "Бренд", "Артикул", "Номер для поиска")
             rows = self._filtered_analog_rows()
         elif self._selected_mode == "stock":
-            rows = self._stock_table_rows(self._stock_rows)
+            rows = self._stock_table_rows(self._stock_rows, sort_by_quantity=True)
         elif self._selected_mode == "exact":
             exact_rows = tuple(row for row in self._stock_rows if row.brand_matches_query and row.quantity > 0)
             rows = self._stock_table_rows(exact_rows)
@@ -588,7 +588,7 @@ class ArticleCheckCanvas(QWidget):
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 quantity_column = 3
                 if column_index == quantity_column and self._selected_mode != "analogs":
-                    item.setForeground(QColor(MINT))
+                    item.setForeground(QColor(self._quantity_color(value)))
                     item.setTextAlignment(Qt.AlignCenter)
                 elif column_index > 0:
                     item.setTextAlignment(Qt.AlignCenter)
@@ -604,10 +604,22 @@ class ArticleCheckCanvas(QWidget):
         if len(headers) > 1:
             self._table.setSpan(0, 0, 1, len(headers))
 
-    def _stock_table_rows(self, rows: tuple[ProductStockMatch, ...]) -> list[tuple[str, str, str, str, str]]:
+    def _stock_table_rows(
+        self,
+        rows: tuple[ProductStockMatch, ...],
+        *,
+        sort_by_quantity: bool = False,
+    ) -> list[tuple[str, str, str, str, str]]:
+        if sort_by_quantity:
+            sorted_rows = sorted(
+                rows,
+                key=lambda item: (-item.quantity, item.brand.casefold(), item.article.casefold(), item.name.casefold()),
+            )
+        else:
+            sorted_rows = sorted(rows, key=lambda item: (item.brand.casefold(), item.article.casefold(), item.name.casefold()))
         return [
             (row.name, row.article, row.brand, self._format_quantity(row.quantity), row.cell)
-            for row in sorted(rows, key=lambda item: (item.brand.casefold(), item.article.casefold(), item.name.casefold()))
+            for row in sorted_rows
         ]
 
     @staticmethod
@@ -616,6 +628,15 @@ class ArticleCheckCanvas(QWidget):
         if numeric_quantity.is_integer():
             return str(int(numeric_quantity))
         return f"{numeric_quantity:g}"
+
+    @staticmethod
+    def _quantity_color(quantity: str) -> str:
+        numeric_quantity = float(quantity.replace(",", "."))
+        if numeric_quantity > 0:
+            return MINT
+        if numeric_quantity < 0:
+            return RED
+        return "#8FA8B9"
 
     @staticmethod
     def _format_count(count: int, one: str, few: str, many: str) -> str:
