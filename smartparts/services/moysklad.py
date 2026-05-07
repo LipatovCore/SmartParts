@@ -20,6 +20,7 @@ PRODUCT_URL = f"{API_BASE_URL}/entity/product"
 COUNTERPARTY_URL = f"{API_BASE_URL}/entity/counterparty"
 WAREHOUSE_URL = f"{API_BASE_URL}/entity/store"
 STOCK_CURRENT_URL = f"{API_BASE_URL}/report/stock/all/current"
+STOCK_BY_SLOT_CURRENT_URL = f"{API_BASE_URL}/report/stock/byslot/current"
 STOCK_ALL_URL = f"{API_BASE_URL}/report/stock/all"
 BRANDS_DICTIONARY_NAME = "Бренды"
 BRAND_ATTRIBUTE_NAMES = ("Бренд", "Бренды")
@@ -273,6 +274,8 @@ def _request_article_stock(token: str, warehouse_id: str, items: list[ArticleLoo
 
     stock_by_product_id = _request_stock_by_warehouse(token, warehouse_id)
     print(f"[MoySklad] Stock rows indexed: {len(stock_by_product_id)}", flush=True)
+    cell_by_product_id = _request_cells_by_product(token, warehouse_id, tuple(products))
+    print(f"[MoySklad] Cell rows indexed: {len(cell_by_product_id)}", flush=True)
     results: list[ProductStockMatch] = []
     for product_id, product in products.items():
         article = _extract_string(product, "article")
@@ -286,7 +289,7 @@ def _request_article_stock(token: str, warehouse_id: str, items: list[ArticleLoo
                 article=article,
                 brand=brand,
                 quantity=stock_by_product_id.get(product_id, 0.0),
-                cell="",
+                cell=cell_by_product_id.get(product_id, ""),
                 brand_matches_query=normalize_brand(brand) in source_brands,
             )
         )
@@ -370,6 +373,107 @@ def _request_stock_by_warehouse(token: str, warehouse_id: str) -> dict[str, floa
             return stock_rows
     print("[MoySklad] Stock response has no usable rows", flush=True)
     return {}
+
+
+def _request_cells_by_product(token: str, warehouse_id: str, product_ids: tuple[str, ...]) -> dict[str, str]:
+    if not warehouse_id or not product_ids:
+        return {}
+
+    slot_rows = _request_slot_stock_by_warehouse(token, warehouse_id, product_ids)
+    if not slot_rows:
+        return {}
+
+    slot_names = _request_slot_names(token, warehouse_id)
+    cells_by_product_id: dict[str, list[tuple[str, float]]] = {}
+    for product_id, rows in slot_rows.items():
+        cell_rows: list[tuple[str, float]] = []
+        for slot_id, stock in rows:
+            slot_name = slot_names.get(slot_id, slot_id)
+            if slot_name:
+                cell_rows.append((slot_name, stock))
+        if cell_rows:
+            cells_by_product_id[product_id] = cell_rows
+
+    return {
+        product_id: _format_cell_rows(cell_rows)
+        for product_id, cell_rows in cells_by_product_id.items()
+    }
+
+
+def _request_slot_stock_by_warehouse(token: str, warehouse_id: str, product_ids: tuple[str, ...]) -> dict[str, list[tuple[str, float]]]:
+    slot_rows_by_product_id: dict[str, list[tuple[str, float]]] = {}
+    chunk_size = 80
+    for chunk_start in range(0, len(product_ids), chunk_size):
+        product_chunk = product_ids[chunk_start : chunk_start + chunk_size]
+        filter_value = f"assortmentId={','.join(product_chunk)};storeId={warehouse_id}"
+        query = urlencode({"filter": filter_value})
+        try:
+            print(
+                f"[MoySklad] Slot stock request: products={len(product_chunk)}, warehouse_id={warehouse_id}",
+                flush=True,
+            )
+            payload = _open_payload(_bearer_request(f"{STOCK_BY_SLOT_CURRENT_URL}?{query}", token))
+        except MoySkladAuthError as error:
+            print(f"[MoySklad] Slot stock skipped: {error.message}", flush=True)
+            return slot_rows_by_product_id
+
+        if not isinstance(payload, list):
+            print("[MoySklad] Slot stock response has no usable rows", flush=True)
+            continue
+
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            product_id = _extract_string(row, "assortmentId")
+            slot_id = _extract_string(row, "slotId")
+            stock = _extract_float(row, ("stock", "quantity", "freeStock"))
+            if not product_id or not slot_id or stock <= 0:
+                continue
+            slot_rows_by_product_id.setdefault(product_id, []).append((slot_id, stock))
+
+    return slot_rows_by_product_id
+
+
+def _request_slot_names(token: str, warehouse_id: str) -> dict[str, str]:
+    slot_names: dict[str, str] = {}
+    offset = 0
+    while True:
+        query = urlencode({"limit": PAGE_LIMIT, "offset": offset})
+        try:
+            payload = _open_json(_bearer_request(f"{WAREHOUSE_URL}/{quote(warehouse_id)}/slots?{query}", token))
+        except MoySkladAuthError as error:
+            print(f"[MoySklad] Slot names skipped: {error.message}", flush=True)
+            return slot_names
+
+        rows = payload.get("rows")
+        if not isinstance(rows, list):
+            print("[MoySklad] Slot names response has no usable rows", flush=True)
+            return slot_names
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            slot_id = _extract_entity_id(row)
+            slot_name = _extract_string(row, "name") or _extract_string(row, "code")
+            if slot_id and slot_name:
+                slot_names[slot_id] = slot_name
+
+        meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+        size = meta.get("size")
+        limit = meta.get("limit", PAGE_LIMIT)
+        offset = meta.get("offset", offset) + limit
+        if not isinstance(size, int) or not isinstance(limit, int) or offset >= size:
+            break
+
+    return slot_names
+
+
+def _format_cell_rows(cell_rows: list[tuple[str, float]]) -> str:
+    formatted: list[str] = []
+    for cell_name, stock in sorted(cell_rows, key=lambda item: item[0].casefold()):
+        quantity = int(stock) if float(stock).is_integer() else f"{stock:g}"
+        formatted.append(f"{cell_name} ({quantity})")
+    return "; ".join(formatted)
 
 
 def _extract_current_stock_rows(rows: list) -> dict[str, float]:
