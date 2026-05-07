@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import quote, urlencode
 
-from smartparts.session import AppSession, Brand, Counterparty
+from smartparts.session import AppSession, Brand, Counterparty, Warehouse
 
 
 API_BASE_URL = "https://api.moysklad.ru/api/remap/1.2"
@@ -16,6 +16,7 @@ EMPLOYEE_URL = f"{API_BASE_URL}/entity/employee"
 CUSTOM_ENTITY_URL = f"{API_BASE_URL}/entity/customentity"
 PRODUCT_URL = f"{API_BASE_URL}/entity/product"
 COUNTERPARTY_URL = f"{API_BASE_URL}/entity/counterparty"
+WAREHOUSE_URL = f"{API_BASE_URL}/entity/store"
 BRANDS_DICTIONARY_NAME = "Бренды"
 BRAND_ATTRIBUTE_NAMES = ("Бренд", "Бренды")
 REQUEST_TIMEOUT_SECONDS = 15
@@ -49,6 +50,10 @@ def load_brands(access_token: str) -> tuple[Brand, ...]:
 
 def load_counterparties(access_token: str) -> tuple[Counterparty, ...]:
     return _request_counterparties(access_token)
+
+
+def load_warehouses(access_token: str) -> tuple[Warehouse, ...]:
+    return _request_warehouses(access_token)
 
 
 def _request_token(login: str, password: str) -> str:
@@ -178,6 +183,28 @@ def _request_counterparties(token: str) -> tuple[Counterparty, ...]:
     return tuple(counterparties)
 
 
+def _request_warehouses(token: str) -> tuple[Warehouse, ...]:
+    warehouses: list[Warehouse] = []
+    offset = 0
+    while True:
+        query = urlencode({"limit": PAGE_LIMIT, "offset": offset})
+        payload = _open_json(_bearer_request(f"{WAREHOUSE_URL}?{query}", token))
+        rows = payload.get("rows")
+        if not isinstance(rows, list):
+            raise MoySkladAuthError("MoySklad returned an invalid warehouses list.")
+
+        warehouses.extend(_extract_warehouse(row) for row in rows if isinstance(row, dict))
+
+        meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+        size = meta.get("size")
+        limit = meta.get("limit", PAGE_LIMIT)
+        offset = meta.get("offset", offset) + limit
+        if not isinstance(size, int) or not isinstance(limit, int) or offset >= size:
+            break
+
+    return tuple(warehouses)
+
+
 def _find_custom_entity_ids_in_entity_rows(token: str, entity_url: str, attribute_names: tuple[str, ...]) -> tuple[str, ...]:
     query = urlencode({"limit": 100, "offset": 0, "expand": "attributes.value"})
     try:
@@ -275,6 +302,14 @@ def _extract_counterparty(payload: dict) -> Counterparty:
         phone=_extract_string(payload, "phone"),
         group=_extract_group_name(payload),
         comment=_extract_string(payload, "description"),
+    )
+
+
+def _extract_warehouse(payload: dict) -> Warehouse:
+    return Warehouse(
+        id=_extract_string(payload, "id"),
+        name=_extract_string(payload, "name"),
+        address=_extract_string(payload, "address"),
     )
 
 

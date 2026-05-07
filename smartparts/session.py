@@ -19,9 +19,17 @@ class Counterparty:
 
 
 @dataclass(frozen=True)
+class Warehouse:
+    id: str
+    name: str
+    address: str = ""
+
+
+@dataclass(frozen=True)
 class AppSession:
     access_token: str
     operator_name: str
     system_role: str
     brands: tuple[Brand, ...] = ()
     counterparties: tuple[Counterparty, ...] = ()
+    warehouses: tuple[Warehouse, ...] = ()

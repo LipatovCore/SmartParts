@@ -72,6 +72,7 @@ class ArticleCheckCanvas(QWidget):
         self._section_buttons: dict[str, QPushButton] = {}
         self._parsed_analog_rows: list[tuple[str, str, str, str]] = []
         self._selected_brand = ""
+        self._selected_warehouse_id = ""
         self.setObjectName("articleCheckCanvas")
         self.setStyleSheet(article_check_stylesheet())
 
@@ -257,7 +258,7 @@ class ArticleCheckCanvas(QWidget):
             "1. Нажмите «Открыть сайт».\n"
             "2. На сайте вставьте нужный артикул, выберите бренд и выполните поиск.\n"
             "3. Скопируйте всю страницу через Ctrl+A и Ctrl+C.\n"
-            "4. Вернитесь сюда, вставьте текст страницы в большое поле и нажмите «Отправить»."
+            "4. Вернитесь сюда, выберите склад, вставьте текст страницы в большое поле и нажмите «Отправить»."
         )
         instruction.setObjectName("instructionText")
         instruction.setWordWrap(True)
@@ -271,6 +272,17 @@ class ArticleCheckCanvas(QWidget):
         open_site.setFixedSize(156, 40)
         open_site.clicked.connect(self._open_article_site)
         panel_layout.addWidget(open_site)
+
+        warehouse_label = QLabel("Склад")
+        warehouse_label.setObjectName("fieldLabel")
+        panel_layout.addWidget(warehouse_label)
+
+        self._warehouse_combo = QComboBox()
+        self._warehouse_combo.setObjectName("brandFilterCombo")
+        self._warehouse_combo.setCursor(Qt.PointingHandCursor)
+        self._warehouse_combo.currentIndexChanged.connect(self._on_warehouse_changed)
+        self._populate_warehouse_select()
+        panel_layout.addWidget(self._warehouse_combo)
 
         label = QLabel("Скопированная страница")
         label.setObjectName("fieldLabel")
@@ -290,14 +302,15 @@ class ArticleCheckCanvas(QWidget):
         hint.setWordWrap(True)
         actions.addWidget(hint, 1)
 
-        submit = QPushButton("Отправить")
-        submit.setObjectName("primaryAction")
-        submit.setIcon(IconWidget.to_icon("send", "#061116", 16))
-        submit.setIconSize(QSize(16, 16))
-        submit.setCursor(Qt.PointingHandCursor)
-        submit.setFixedSize(150, 42)
-        submit.clicked.connect(self._submit_page_text)
-        actions.addWidget(submit)
+        self._submit_button = QPushButton("Отправить")
+        self._submit_button.setObjectName("primaryAction")
+        self._submit_button.setIcon(IconWidget.to_icon("send", "#061116", 16))
+        self._submit_button.setIconSize(QSize(16, 16))
+        self._submit_button.setCursor(Qt.PointingHandCursor)
+        self._submit_button.setFixedSize(150, 42)
+        self._submit_button.clicked.connect(self._submit_page_text)
+        actions.addWidget(self._submit_button)
+        self._refresh_submit_state()
         panel_layout.addLayout(actions)
 
         layout.addWidget(panel, 1)
@@ -392,7 +405,38 @@ class ArticleCheckCanvas(QWidget):
     def _open_article_site(self) -> None:
         QDesktopServices.openUrl(QUrl(self.ARTICLE_SEARCH_URL))
 
+    def _populate_warehouse_select(self) -> None:
+        self._warehouse_combo.blockSignals(True)
+        self._warehouse_combo.clear()
+        if self.session.warehouses:
+            self._warehouse_combo.addItem("Выберите склад", "")
+            for warehouse in sorted(self.session.warehouses, key=lambda item: item.name.casefold()):
+                title = warehouse.name
+                if warehouse.address:
+                    title = f"{warehouse.name} - {warehouse.address}"
+                self._warehouse_combo.addItem(title, warehouse.id)
+            self._warehouse_combo.setCurrentIndex(0)
+        else:
+            self._warehouse_combo.addItem("Склады не загружены", "")
+            self._warehouse_combo.setEnabled(False)
+        self._selected_warehouse_id = ""
+        self._warehouse_combo.blockSignals(False)
+
+    def _on_warehouse_changed(self, *_args: object) -> None:
+        self._selected_warehouse_id = self._warehouse_combo.currentData() or ""
+        self._refresh_submit_state()
+
+    def _refresh_submit_state(self) -> None:
+        if not hasattr(self, "_submit_button"):
+            return
+        can_submit = bool(self._selected_warehouse_id)
+        self._submit_button.setEnabled(can_submit)
+        self._submit_button.setCursor(Qt.PointingHandCursor if can_submit else Qt.ForbiddenCursor)
+
     def _submit_page_text(self) -> None:
+        if not self._selected_warehouse_id:
+            self._refresh_submit_state()
+            return
         self._parsed_analog_rows = self._parse_article_page(self._page_text.toPlainText())
         self._selected_brand = ""
         self._populate_brand_filter()

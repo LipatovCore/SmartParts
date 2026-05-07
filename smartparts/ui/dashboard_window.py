@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from smartparts.session import AppSession
-from smartparts.services.moysklad import load_brands, load_counterparties
+from smartparts.services.moysklad import load_brands, load_counterparties, load_warehouses
 from smartparts.theme import CYAN, MINT, RED, WINDOW_HEIGHT, WINDOW_WIDTH
 from smartparts.ui.article_check_window import ArticleCheckCanvas
 from smartparts.ui.icons import IconWidget
@@ -54,7 +54,7 @@ class CounterpartyLoaderWorker(QObject):
 
     def run(self) -> None:
         try:
-            self.succeeded.emit(load_counterparties(self._access_token))
+            self.succeeded.emit((load_counterparties(self._access_token), load_warehouses(self._access_token)))
         except Exception as error:
             self.failed.emit(str(error))
         finally:
@@ -178,9 +178,21 @@ class DashboardWindow(QMainWindow):
         self._counterparty_loader_thread.start()
 
     def _apply_loaded_counterparties(self, counterparties: object) -> None:
-        loaded_counterparties = tuple(counterparties)
+        loaded_counterparties: tuple = ()
+        loaded_warehouses: tuple = ()
+        if (
+            isinstance(counterparties, tuple)
+            and len(counterparties) == 2
+            and isinstance(counterparties[0], (list, tuple))
+            and isinstance(counterparties[1], (list, tuple))
+        ):
+            loaded_counterparties = tuple(counterparties[0])
+            loaded_warehouses = tuple(counterparties[1])
+        else:
+            loaded_counterparties = tuple(counterparties)
         print(f"Loaded MoySklad counterparties: {len(loaded_counterparties)}", flush=True)
-        self.session = replace(self.session, counterparties=loaded_counterparties)
+        print(f"Loaded MoySklad warehouses: {len(loaded_warehouses)}", flush=True)
+        self.session = replace(self.session, counterparties=loaded_counterparties, warehouses=loaded_warehouses)
         self._counterparties_loading = False
         if self._dashboard_canvas is not None:
             self._dashboard_canvas.set_session(self.session)
@@ -311,7 +323,7 @@ class DashboardCanvas(QWidget):
         title.setObjectName("brandsLoadingTitle")
         text_layout.addWidget(title)
 
-        subtitle = QLabel("Бренды и контрагенты")
+        subtitle = QLabel("Бренды, контрагенты и склады")
         subtitle.setObjectName("brandsLoadingSubtitle")
         text_layout.addWidget(subtitle)
 

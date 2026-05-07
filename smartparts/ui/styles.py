@@ -863,6 +863,11 @@ def article_check_stylesheet() -> str:
     #primaryAction:hover {{
         background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5AF7FA, stop:1 #5DFFC0);
     }}
+    #primaryAction:disabled {{
+        color: #6F8493;
+        background: #10202A;
+        border: 1px solid #263948;
+    }}
     #modeSwitcher {{
         background: #101B24;
         border: 1px solid #263948;
