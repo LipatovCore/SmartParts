@@ -1,16 +1,17 @@
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QLinearGradient, QPainter
+from PySide6.QtCore import QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QLinearGradient, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QPushButton,
     QSizePolicy,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -25,23 +26,25 @@ class ArticleCheckCanvas(QWidget):
     logout_requested = Signal()
     return_to_dashboard_requested = Signal()
 
+    ARTICLE_SEARCH_URL = "https://www.abcp.ru/crossbase/api#articles_info"
+
     _MODES = {
         "exact": {
             "button": "Точные совпадения",
             "headers": ("Наименование", "Артикул", "Бренд", "Кол-во", "Ячейка"),
             "rows": (
                 ("Фильтр масляный BMW N47", "11428507683", "BMW", "3", "A-12-04"),
-                ("Фильтр масляный найден по артикулу", "11428507683", "BMW OEM", "1", "B-03-11"),
-                ("Прокладка корпуса фильтра", "11428507683", "BMW", "5", "C-08-02"),
+                ("Фильтр масляный аналог", "11428507683", "BMW OEM", "1", "B-03-11"),
+                ("Картридж масляного фильтра", "11428507683", "BMW", "5", "C-08-02"),
             ),
         },
         "stock": {
-            "button": "По артикулу",
-            "headers": ("Наименование", "Артикул", "Кол-во", "Ячейка"),
+            "button": "Есть в МойСклад",
+            "headers": ("Наименование", "Артикул", "Бренд", "Кол-во", "Ячейка"),
             "rows": (
-                ("Фильтр масляный BMW N47", "11428507683", "3", "A-12-04"),
-                ("Фильтр масляный найден по артикулу", "11428507683", "1", "B-03-11"),
-                ("Прокладка корпуса фильтра", "11428507683", "5", "C-08-02"),
+                ("Фильтр масляный BMW N47", "11428507683", "BMW", "3", "A-12-04"),
+                ("Фильтр масляный аналог", "11428507683", "BMW OEM", "1", "B-03-11"),
+                ("Картридж масляного фильтра", "11428507683", "BMW", "5", "C-08-02"),
             ),
         },
         "analogs": {
@@ -58,8 +61,10 @@ class ArticleCheckCanvas(QWidget):
     def __init__(self, session: AppSession) -> None:
         super().__init__()
         self.session = session
+        self._active_section = "paste"
         self._selected_mode = "exact"
         self._mode_buttons: dict[str, QPushButton] = {}
+        self._section_buttons: dict[str, QPushButton] = {}
         self.setObjectName("articleCheckCanvas")
         self.setStyleSheet(article_check_stylesheet())
 
@@ -70,6 +75,7 @@ class ArticleCheckCanvas(QWidget):
         self._workspace_widget = self._workspace()
         root.addWidget(self._sidebar_widget)
         root.addWidget(self._workspace_widget, 1)
+        self._show_section("paste")
         self._set_mode("exact")
 
     def _sidebar(self) -> QFrame:
@@ -82,6 +88,7 @@ class ArticleCheckCanvas(QWidget):
         layout.setContentsMargins(22, 30, 22, 30)
         layout.setSpacing(24)
         layout.addWidget(self._brand_area())
+        layout.addWidget(self._section_switcher())
         layout.addStretch(1)
         layout.addWidget(self._session_panel())
         return sidebar
@@ -105,6 +112,31 @@ class ArticleCheckCanvas(QWidget):
         subtitle.setObjectName("brandSubtitle")
         layout.addWidget(subtitle)
         return area
+
+    def _section_switcher(self) -> QFrame:
+        panel = QFrame()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        title = QLabel("Проверка")
+        title.setObjectName("sessionTitle")
+        layout.addWidget(title)
+
+        for key, text, icon in (
+            ("paste", "Вставка страницы", "file-plus"),
+            ("results", "Результаты", "package-check"),
+        ):
+            button = QPushButton(text)
+            button.setObjectName("navButton")
+            button.setIcon(IconWidget.to_icon(icon, "#8FA8B9", 16))
+            button.setIconSize(QSize(16, 16))
+            button.setCursor(Qt.PointingHandCursor)
+            button.setFixedHeight(38)
+            button.clicked.connect(lambda checked=False, section=key: self._show_section(section))
+            self._section_buttons[key] = button
+            layout.addWidget(button)
+        return panel
 
     def _session_panel(self) -> QFrame:
         panel = QFrame()
@@ -159,10 +191,12 @@ class ArticleCheckCanvas(QWidget):
         layout.setContentsMargins(34, 28, 34, 28)
         layout.setSpacing(16)
         layout.addWidget(self._header())
-        layout.addWidget(self._search_row())
-        layout.addWidget(self._mode_switcher())
-        self._table = self._results_table()
-        layout.addWidget(self._table, 1)
+
+        self._stack = QStackedWidget()
+        self._stack.setObjectName("articlePageStack")
+        self._stack.addWidget(self._paste_page())
+        self._stack.addWidget(self._results_page())
+        layout.addWidget(self._stack, 1)
         return workspace
 
     def _header(self) -> QFrame:
@@ -176,13 +210,13 @@ class ArticleCheckCanvas(QWidget):
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(6)
 
-        title = QLabel("Проверка артикула")
-        title.setObjectName("pageTitle")
-        subtitle = QLabel("Поиск по МойСклад, точных аналогов или похожего артикула")
-        subtitle.setObjectName("pageSubtitle")
-        self._page_subtitle = subtitle
-        text_layout.addWidget(title)
-        text_layout.addWidget(subtitle)
+        self._page_title = QLabel()
+        self._page_title.setObjectName("pageTitle")
+        self._page_subtitle = QLabel()
+        self._page_subtitle.setObjectName("pageSubtitle")
+        self._page_subtitle.setWordWrap(True)
+        text_layout.addWidget(self._page_title)
+        text_layout.addWidget(self._page_subtitle)
 
         back = QPushButton("На главную")
         back.setObjectName("backToDashboardButton")
@@ -196,47 +230,81 @@ class ArticleCheckCanvas(QWidget):
         layout.addWidget(back)
         return header
 
-    def _search_row(self) -> QFrame:
-        row = QFrame()
-        layout = QHBoxLayout(row)
+    def _paste_page(self) -> QFrame:
+        page = QFrame()
+        layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(16)
 
-        field_panel = QFrame()
-        field_layout = QVBoxLayout(field_panel)
-        field_layout.setContentsMargins(0, 0, 0, 0)
-        field_layout.setSpacing(6)
+        panel = QFrame()
+        panel.setObjectName("pastePanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(18, 18, 18, 18)
+        panel_layout.setSpacing(14)
 
-        label = QLabel("Поиск")
+        instruction_title = QLabel("Как все сделать")
+        instruction_title.setObjectName("instructionTitle")
+        panel_layout.addWidget(instruction_title)
+
+        instruction = QLabel(
+            "1. Нажмите «Открыть сайт».\n"
+            "2. На сайте вставьте нужный артикул, выберите бренд и выполните поиск.\n"
+            "3. Скопируйте всю страницу через Ctrl+A и Ctrl+C.\n"
+            "4. Вернитесь сюда, вставьте текст страницы в большое поле и нажмите «Отправить»."
+        )
+        instruction.setObjectName("instructionText")
+        instruction.setWordWrap(True)
+        panel_layout.addWidget(instruction)
+
+        open_site = QPushButton("Открыть сайт")
+        open_site.setObjectName("secondaryAction")
+        open_site.setIcon(IconWidget.to_icon("search", CYAN, 16))
+        open_site.setIconSize(QSize(16, 16))
+        open_site.setCursor(Qt.PointingHandCursor)
+        open_site.setFixedSize(156, 40)
+        open_site.clicked.connect(self._open_article_site)
+        panel_layout.addWidget(open_site)
+
+        label = QLabel("Скопированная страница")
         label.setObjectName("fieldLabel")
-        field_layout.addWidget(label)
+        panel_layout.addWidget(label)
 
-        shell = QFrame()
-        shell.setObjectName("articleSearchShell")
-        shell.setFixedHeight(42)
-        shell_layout = QHBoxLayout(shell)
-        shell_layout.setContentsMargins(14, 0, 14, 0)
-        shell_layout.setSpacing(10)
-        shell_layout.addWidget(IconWidget("search", CYAN, 16))
+        self._page_text = QTextEdit()
+        self._page_text.setObjectName("pagePasteInput")
+        self._page_text.setPlaceholderText("Вставьте сюда текст страницы после Ctrl+A и Ctrl+C...")
+        self._page_text.setMinimumHeight(270)
+        panel_layout.addWidget(self._page_text, 1)
 
-        self._search_input = QLineEdit("BMW 11428507683")
-        self._search_input.setObjectName("articleSearchInput")
-        self._search_input.setFrame(False)
-        self._search_input.returnPressed.connect(self._apply_filter)
-        shell_layout.addWidget(self._search_input, 1)
-        field_layout.addWidget(shell)
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(12)
+        hint = QLabel("После отправки программа выделит аналоги и покажет результат в выбранном режиме.")
+        hint.setObjectName("instructionText")
+        hint.setWordWrap(True)
+        actions.addWidget(hint, 1)
 
-        check = QPushButton("Проверить")
-        check.setObjectName("primaryAction")
-        check.setIcon(IconWidget.to_icon("search", "#061116", 16))
-        check.setIconSize(QSize(16, 16))
-        check.setCursor(Qt.PointingHandCursor)
-        check.setFixedSize(132, 42)
-        check.clicked.connect(self._apply_filter)
+        submit = QPushButton("Отправить")
+        submit.setObjectName("primaryAction")
+        submit.setIcon(IconWidget.to_icon("send", "#061116", 16))
+        submit.setIconSize(QSize(16, 16))
+        submit.setCursor(Qt.PointingHandCursor)
+        submit.setFixedSize(150, 42)
+        submit.clicked.connect(self._submit_page_text)
+        actions.addWidget(submit)
+        panel_layout.addLayout(actions)
 
-        layout.addWidget(field_panel, 1)
-        layout.addWidget(check, 0, Qt.AlignBottom)
-        return row
+        layout.addWidget(panel, 1)
+        return page
+
+    def _results_page(self) -> QFrame:
+        page = QFrame()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+        layout.addWidget(self._mode_switcher())
+        self._table = self._results_table()
+        layout.addWidget(self._table, 1)
+        return page
 
     def _mode_switcher(self) -> QFrame:
         switcher = QFrame()
@@ -270,15 +338,42 @@ class ArticleCheckCanvas(QWidget):
         table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         return table
 
+    def _show_section(self, section: str) -> None:
+        self._active_section = section
+        if hasattr(self, "_stack"):
+            self._stack.setCurrentIndex(0 if section == "paste" else 1)
+        if hasattr(self, "_page_title"):
+            if section == "paste":
+                self._page_title.setText("Вставка страницы с аналогами")
+                self._page_subtitle.setText("Откройте сайт, найдите артикул по бренду, скопируйте страницу и отправьте ее на разбор")
+            else:
+                self._page_title.setText("Результаты разбора страницы")
+                self._page_subtitle.setText("Точные совпадения, наличие в МойСклад и аналоги из скопированной страницы")
+        self._refresh_section_buttons()
+
+    def _refresh_section_buttons(self) -> None:
+        for key, button in self._section_buttons.items():
+            active = key == self._active_section
+            button.setObjectName("navActive" if active else "navButton")
+            color = CYAN if active else "#8FA8B9"
+            icon = "file-plus" if key == "paste" else "package-check"
+            button.setIcon(IconWidget.to_icon(icon, color, 16))
+            button.style().unpolish(button)
+            button.style().polish(button)
+
+    def _open_article_site(self) -> None:
+        QDesktopServices.openUrl(QUrl(self.ARTICLE_SEARCH_URL))
+
+    def _submit_page_text(self) -> None:
+        self._show_section("results")
+        self._render_table()
+
     def _set_mode(self, mode: str) -> None:
         self._selected_mode = mode
         for key, button in self._mode_buttons.items():
             button.setObjectName("modeToggleActive" if key == mode else "modeToggleInactive")
             button.style().unpolish(button)
             button.style().polish(button)
-        self._render_table()
-
-    def _apply_filter(self) -> None:
         self._render_table()
 
     def _render_table(self) -> None:
@@ -297,7 +392,7 @@ class ArticleCheckCanvas(QWidget):
             for column_index, value in enumerate(row):
                 item = QTableWidgetItem(value)
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                quantity_column = 3 if self._selected_mode == "exact" else 2
+                quantity_column = 3
                 if column_index == quantity_column and self._selected_mode != "analogs":
                     item.setForeground(QColor(MINT))
                     item.setTextAlignment(Qt.AlignCenter)
@@ -306,15 +401,15 @@ class ArticleCheckCanvas(QWidget):
                 self._table.setItem(row_index, column_index, item)
 
     def _filtered_rows(self, rows: tuple[tuple[str, ...], ...]) -> list[tuple[str, ...]]:
-        query = self._search_input.text().strip().casefold() if hasattr(self, "_search_input") else ""
-        tokens = [token for token in query.replace("-", " ").split() if token]
+        pasted_text = self._page_text.toPlainText().strip().casefold() if hasattr(self, "_page_text") else ""
+        tokens = [token for token in pasted_text.replace("-", " ").split() if len(token) >= 4]
         if not tokens:
             return list(rows)
 
         filtered = []
         for row in rows:
             haystack = " ".join(row).casefold()
-            if any(token in haystack for token in tokens):
+            if any(token in haystack for token in tokens[:50]):
                 filtered.append(row)
         return filtered or list(rows)
 

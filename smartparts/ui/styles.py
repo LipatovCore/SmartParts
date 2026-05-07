@@ -773,7 +773,9 @@ def article_check_stylesheet() -> str:
         font-weight: 600;
     }}
     #logoutButton,
-    #backToDashboardButton {{
+    #backToDashboardButton,
+    #secondaryAction,
+    #navActive {{
         color: #DDEAF2;
         font-size: 13px;
         font-weight: 700;
@@ -782,9 +784,50 @@ def article_check_stylesheet() -> str:
         border-radius: 6px;
     }}
     #logoutButton:hover,
-    #backToDashboardButton:hover {{
+    #backToDashboardButton:hover,
+    #secondaryAction:hover,
+    #navActive:hover {{
         background: #173242;
         border-color: rgba(50, 246, 166, 0.75);
+    }}
+    #navButton {{
+        color: #8FA8B9;
+        font-size: 13px;
+        font-weight: 700;
+        text-align: left;
+        padding: 0 12px;
+        background: #0B1219;
+        border: 1px solid #263948;
+        border-radius: 6px;
+    }}
+    #navButton:hover {{
+        color: #DDEAF2;
+        background: #10202A;
+    }}
+    #navActive {{
+        color: #F4FAFF;
+        text-align: left;
+        padding: 0 12px;
+        background: #14313A;
+    }}
+    #articlePageStack {{
+        background: transparent;
+        border: none;
+    }}
+    #pastePanel {{
+        background: #101B24;
+        border: 1px solid #263948;
+        border-radius: 8px;
+    }}
+    #instructionTitle {{
+        color: {CYAN};
+        font-size: 13px;
+        font-weight: 700;
+    }}
+    #instructionText {{
+        color: #8FA8B9;
+        font-size: 13px;
+        line-height: 1.35;
     }}
     #articleSearchShell {{
         background: #0B141C;
@@ -796,6 +839,16 @@ def article_check_stylesheet() -> str:
         background: transparent;
         border: none;
         font-size: 14px;
+        selection-background-color: {CYAN};
+        selection-color: #061116;
+    }}
+    #pagePasteInput {{
+        color: #F4FAFF;
+        background: #0B141C;
+        border: 1px solid rgba(45, 226, 230, 0.55);
+        border-radius: 6px;
+        font-size: 14px;
+        padding: 12px;
         selection-background-color: {CYAN};
         selection-color: #061116;
     }}
