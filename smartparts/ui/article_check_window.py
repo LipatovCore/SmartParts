@@ -2,7 +2,7 @@ import json
 from json import JSONDecodeError
 from typing import Any
 
-from PySide6.QtCore import QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QLinearGradient, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -21,10 +21,40 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from smartparts.services.moysklad import ArticleLookupItem, ProductStockMatch, find_article_stock
 from smartparts.session import AppSession
 from smartparts.theme import CYAN, MINT
 from smartparts.ui.icons import IconWidget
 from smartparts.ui.styles import article_check_stylesheet
+
+
+class StockLookupWorker(QObject):
+    succeeded = Signal(object)
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(self, access_token: str, warehouse_id: str, items: list[ArticleLookupItem]) -> None:
+        super().__init__()
+        self._access_token = access_token
+        self._warehouse_id = warehouse_id
+        self._items = items
+
+    def run(self) -> None:
+        print(
+            f"[ArticleCheck] Worker started: warehouse_id={self._warehouse_id}, lookup_items={len(self._items)}",
+            flush=True,
+        )
+        try:
+            rows = find_article_stock(self._access_token, self._warehouse_id, self._items)
+            print(f"[ArticleCheck] Worker succeeded: stock_rows={len(rows)}", flush=True)
+            self.succeeded.emit(rows)
+        except Exception as error:  # noqa: BLE001 - show API errors in the UI without crashing the Qt thread
+            message = getattr(error, "message", "") or str(error) or "Не удалось проверить наличие в МойСклад."
+            print(f"[ArticleCheck] Worker failed: {message}", flush=True)
+            self.failed.emit(message)
+        finally:
+            print("[ArticleCheck] Worker finished", flush=True)
+            self.finished.emit()
 
 
 class ArticleCheckCanvas(QWidget):
@@ -37,29 +67,17 @@ class ArticleCheckCanvas(QWidget):
         "exact": {
             "button": "Точные совпадения",
             "headers": ("Наименование", "Артикул", "Бренд", "Кол-во", "Ячейка"),
-            "rows": (
-                ("Фильтр масляный BMW N47", "11428507683", "BMW", "3", "A-12-04"),
-                ("Фильтр масляный аналог", "11428507683", "BMW OEM", "1", "B-03-11"),
-                ("Картридж масляного фильтра", "11428507683", "BMW", "5", "C-08-02"),
-            ),
+            "rows": (),
         },
         "stock": {
             "button": "Есть в МойСклад",
             "headers": ("Наименование", "Артикул", "Бренд", "Кол-во", "Ячейка"),
-            "rows": (
-                ("Фильтр масляный BMW N47", "11428507683", "BMW", "3", "A-12-04"),
-                ("Фильтр масляный аналог", "11428507683", "BMW OEM", "1", "B-03-11"),
-                ("Картридж масляного фильтра", "11428507683", "BMW", "5", "C-08-02"),
-            ),
+            "rows": (),
         },
         "analogs": {
             "button": "Аналоги",
             "headers": ("Наименование", "Бренд", "Артикул"),
-            "rows": (
-                ("Аналог масляного фильтра", "MANN", "HU 7028 z"),
-                ("Фильтр масляный аналог", "KNECHT", "OX 404D"),
-                ("Картридж масляного фильтра аналог", "FILTRON", "OE 672/7"),
-            ),
+            "rows": (),
         },
     }
 
@@ -71,6 +89,11 @@ class ArticleCheckCanvas(QWidget):
         self._mode_buttons: dict[str, QPushButton] = {}
         self._section_buttons: dict[str, QPushButton] = {}
         self._parsed_analog_rows: list[tuple[str, str, str, str]] = []
+        self._stock_rows: tuple[ProductStockMatch, ...] = ()
+        self._stock_error_message = ""
+        self._stock_lookup_in_progress = False
+        self._stock_loader_thread: QThread | None = None
+        self._stock_loader_worker: StockLookupWorker | None = None
         self._selected_brand = ""
         self._selected_warehouse_id = ""
         self.setObjectName("articleCheckCanvas")
@@ -297,10 +320,10 @@ class ArticleCheckCanvas(QWidget):
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(12)
-        hint = QLabel("После отправки программа выделит аналоги и покажет результат в выбранном режиме.")
-        hint.setObjectName("instructionText")
-        hint.setWordWrap(True)
-        actions.addWidget(hint, 1)
+        self._status_label = QLabel("После отправки программа выделит аналоги и проверит наличие в МойСклад.")
+        self._status_label.setObjectName("instructionText")
+        self._status_label.setWordWrap(True)
+        actions.addWidget(self._status_label, 1)
 
         self._submit_button = QPushButton("Отправить")
         self._submit_button.setObjectName("primaryAction")
@@ -324,6 +347,10 @@ class ArticleCheckCanvas(QWidget):
         layout.addWidget(self._mode_switcher())
         self._brand_filter = self._brand_filter_panel()
         layout.addWidget(self._brand_filter)
+        self._results_status_label = QLabel("")
+        self._results_status_label.setObjectName("instructionText")
+        self._results_status_label.setWordWrap(True)
+        layout.addWidget(self._results_status_label)
         self._table = self._results_table()
         layout.addWidget(self._table, 1)
         return page
@@ -429,19 +456,96 @@ class ArticleCheckCanvas(QWidget):
     def _refresh_submit_state(self) -> None:
         if not hasattr(self, "_submit_button"):
             return
-        can_submit = bool(self._selected_warehouse_id)
+        can_submit = bool(self._selected_warehouse_id) and not self._stock_lookup_in_progress
         self._submit_button.setEnabled(can_submit)
         self._submit_button.setCursor(Qt.PointingHandCursor if can_submit else Qt.ForbiddenCursor)
+        if hasattr(self, "_warehouse_combo") and self.session.warehouses:
+            self._warehouse_combo.setEnabled(not self._stock_lookup_in_progress)
 
     def _submit_page_text(self) -> None:
+        print("[ArticleCheck] Submit clicked", flush=True)
         if not self._selected_warehouse_id:
+            print("[ArticleCheck] Submit skipped: warehouse is not selected", flush=True)
             self._refresh_submit_state()
             return
-        self._parsed_analog_rows = self._parse_article_page(self._page_text.toPlainText())
+        page_text = self._page_text.toPlainText()
+        print(
+            f"[ArticleCheck] Parsing pasted page: chars={len(page_text)}, warehouse_id={self._selected_warehouse_id}",
+            flush=True,
+        )
+        self._parsed_analog_rows = self._parse_article_page(page_text)
+        print(f"[ArticleCheck] Parsed ABCP rows: {len(self._parsed_analog_rows)}", flush=True)
+        self._stock_rows = ()
+        self._stock_error_message = ""
         self._selected_brand = ""
         self._populate_brand_filter()
-        self._set_mode("analogs")
         self._show_section("results")
+        if not self._parsed_analog_rows:
+            self._set_mode("stock")
+            self._set_status("Не удалось найти JSON с артикулом и аналогами в скопированном тексте.")
+            print("[ArticleCheck] Submit stopped: no ABCP JSON rows parsed", flush=True)
+            return
+        self._set_mode("stock")
+        self._start_stock_lookup()
+
+    def _start_stock_lookup(self) -> None:
+        if self._stock_loader_thread is not None:
+            print("[ArticleCheck] Stock lookup skipped: worker is already running", flush=True)
+            return
+
+        items = [ArticleLookupItem(brand=row[1], number=row[2], normalized_number=row[3]) for row in self._parsed_analog_rows]
+        self._stock_lookup_in_progress = True
+        self._set_status("Проверяем наличие в МойСклад...")
+        self._submit_button.setText("Загрузка...")
+        print(
+            f"[ArticleCheck] Stock lookup started: items={len(items)}, warehouse_id={self._selected_warehouse_id}",
+            flush=True,
+        )
+        self._refresh_submit_state()
+        self._render_table()
+
+        self._stock_loader_thread = QThread(self)
+        self._stock_loader_worker = StockLookupWorker(self.session.access_token, self._selected_warehouse_id, items)
+        self._stock_loader_worker.moveToThread(self._stock_loader_thread)
+        self._stock_loader_thread.started.connect(self._stock_loader_worker.run)
+        self._stock_loader_worker.succeeded.connect(self._apply_stock_rows)
+        self._stock_loader_worker.failed.connect(self._handle_stock_error)
+        self._stock_loader_worker.finished.connect(self._stock_loader_thread.quit)
+        self._stock_loader_worker.finished.connect(self._stock_loader_worker.deleteLater)
+        self._stock_loader_thread.finished.connect(self._stock_loader_thread.deleteLater)
+        self._stock_loader_thread.finished.connect(self._clear_stock_loader)
+        self._stock_loader_thread.start()
+
+    def _apply_stock_rows(self, rows: object) -> None:
+        self._stock_rows = tuple(row for row in rows if isinstance(row, ProductStockMatch)) if isinstance(rows, tuple) else ()
+        self._stock_error_message = ""
+        found_text = self._format_count(len(self._stock_rows), "товар", "товара", "товаров")
+        self._set_status(f"Проверка завершена: найдено {found_text} в МойСклад.")
+        print(f"[ArticleCheck] Stock rows applied: {len(self._stock_rows)}", flush=True)
+        self._render_table()
+
+    def _handle_stock_error(self, message: str) -> None:
+        self._stock_rows = ()
+        self._stock_error_message = message
+        self._set_status(message)
+        print(f"[ArticleCheck] Stock lookup error shown: {message}", flush=True)
+        self._render_table()
+
+    def _clear_stock_loader(self) -> None:
+        self._stock_lookup_in_progress = False
+        self._stock_loader_thread = None
+        self._stock_loader_worker = None
+        if hasattr(self, "_submit_button"):
+            self._submit_button.setText("Отправить")
+        self._refresh_submit_state()
+        print("[ArticleCheck] Stock loader cleared", flush=True)
+        self._render_table()
+
+    def _set_status(self, message: str) -> None:
+        if hasattr(self, "_status_label"):
+            self._status_label.setText(message)
+        if hasattr(self, "_results_status_label"):
+            self._results_status_label.setText(message)
 
     def _set_mode(self, mode: str) -> None:
         self._selected_mode = mode
@@ -458,15 +562,24 @@ class ArticleCheckCanvas(QWidget):
 
         config = self._MODES[self._selected_mode]
         headers = config["headers"]
-        if self._selected_mode == "analogs" and self._parsed_analog_rows:
+        if self._selected_mode == "analogs":
             headers = ("Тип", "Бренд", "Артикул", "Номер для поиска")
             rows = self._filtered_analog_rows()
+        elif self._selected_mode == "stock":
+            rows = self._stock_table_rows(self._stock_rows)
+        elif self._selected_mode == "exact":
+            exact_rows = tuple(row for row in self._stock_rows if row.brand_matches_query and row.quantity > 0)
+            rows = self._stock_table_rows(exact_rows)
         else:
-            rows = self._filtered_rows(config["rows"])
+            rows = list(config["rows"])
         self._refresh_brand_filter_visibility()
         self._table.clear()
+        self._table.clearSpans()
         self._table.setColumnCount(len(headers))
         self._table.setHorizontalHeaderLabels(headers)
+        if self._stock_lookup_in_progress and self._selected_mode in ("exact", "stock"):
+            self._render_loader_row(headers)
+            return
         self._table.setRowCount(len(rows))
 
         for row_index, row in enumerate(rows):
@@ -480,6 +593,39 @@ class ArticleCheckCanvas(QWidget):
                 elif column_index > 0:
                     item.setTextAlignment(Qt.AlignCenter)
                 self._table.setItem(row_index, column_index, item)
+
+    def _render_loader_row(self, headers: tuple[str, ...]) -> None:
+        self._table.setRowCount(1)
+        item = QTableWidgetItem("Загрузка данных из МойСклад...")
+        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+        item.setForeground(QColor(MINT))
+        item.setTextAlignment(Qt.AlignCenter)
+        self._table.setItem(0, 0, item)
+        if len(headers) > 1:
+            self._table.setSpan(0, 0, 1, len(headers))
+
+    def _stock_table_rows(self, rows: tuple[ProductStockMatch, ...]) -> list[tuple[str, str, str, str, str]]:
+        return [
+            (row.name, row.article, row.brand, self._format_quantity(row.quantity), row.cell)
+            for row in sorted(rows, key=lambda item: (item.brand.casefold(), item.article.casefold(), item.name.casefold()))
+        ]
+
+    @staticmethod
+    def _format_quantity(quantity: float) -> str:
+        numeric_quantity = float(quantity)
+        if numeric_quantity.is_integer():
+            return str(int(numeric_quantity))
+        return f"{numeric_quantity:g}"
+
+    @staticmethod
+    def _format_count(count: int, one: str, few: str, many: str) -> str:
+        if count % 10 == 1 and count % 100 != 11:
+            word = one
+        elif count % 10 in (2, 3, 4) and count % 100 not in (12, 13, 14):
+            word = few
+        else:
+            word = many
+        return f"{count} {word}"
 
     def _populate_brand_filter(self) -> None:
         if not hasattr(self, "_brand_filter_combo"):

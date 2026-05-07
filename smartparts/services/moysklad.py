@@ -4,7 +4,9 @@ import json
 import socket
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from urllib.parse import quote, urlencode
+from typing import Any
 
 from smartparts.session import AppSession, Brand, Counterparty, Warehouse
 
@@ -17,10 +19,30 @@ CUSTOM_ENTITY_URL = f"{API_BASE_URL}/entity/customentity"
 PRODUCT_URL = f"{API_BASE_URL}/entity/product"
 COUNTERPARTY_URL = f"{API_BASE_URL}/entity/counterparty"
 WAREHOUSE_URL = f"{API_BASE_URL}/entity/store"
+STOCK_CURRENT_URL = f"{API_BASE_URL}/report/stock/all/current"
+STOCK_ALL_URL = f"{API_BASE_URL}/report/stock/all"
 BRANDS_DICTIONARY_NAME = "Бренды"
 BRAND_ATTRIBUTE_NAMES = ("Бренд", "Бренды")
 REQUEST_TIMEOUT_SECONDS = 15
 PAGE_LIMIT = 1000
+
+
+@dataclass(frozen=True)
+class ArticleLookupItem:
+    brand: str
+    number: str
+    normalized_number: str = ""
+
+
+@dataclass(frozen=True)
+class ProductStockMatch:
+    id: str
+    name: str
+    article: str
+    brand: str
+    quantity: float
+    cell: str = ""
+    brand_matches_query: bool = False
 
 
 class MoySkladAuthError(Exception):
@@ -54,6 +76,19 @@ def load_counterparties(access_token: str) -> tuple[Counterparty, ...]:
 
 def load_warehouses(access_token: str) -> tuple[Warehouse, ...]:
     return _request_warehouses(access_token)
+
+
+def find_article_stock(access_token: str, warehouse_id: str, items: list[ArticleLookupItem]) -> tuple[ProductStockMatch, ...]:
+    print(f"[MoySklad] find_article_stock: warehouse_id={warehouse_id}, items={len(items)}", flush=True)
+    return _request_article_stock(access_token, warehouse_id, items)
+
+
+def normalize_article(value: str) -> str:
+    return "".join(character for character in value.upper() if character.isalnum())
+
+
+def normalize_brand(value: str) -> str:
+    return "".join(character for character in value.casefold().upper() if character.isalnum())
 
 
 def _request_token(login: str, password: str) -> str:
@@ -205,6 +240,165 @@ def _request_warehouses(token: str) -> tuple[Warehouse, ...]:
     return tuple(warehouses)
 
 
+def _request_article_stock(token: str, warehouse_id: str, items: list[ArticleLookupItem]) -> tuple[ProductStockMatch, ...]:
+    article_to_brands: dict[str, set[str]] = {}
+    search_terms: set[str] = set()
+    for item in items:
+        brand_key = normalize_brand(item.brand)
+        for term in (item.number, item.normalized_number, normalize_article(item.number), normalize_article(item.normalized_number)):
+            term = term.strip()
+            article_key = normalize_article(term)
+            if not article_key:
+                continue
+            search_terms.add(term)
+            search_terms.add(article_key)
+            article_to_brands.setdefault(article_key, set()).add(brand_key)
+
+    print(
+        f"[MoySklad] Prepared lookup: article_keys={len(article_to_brands)}, search_terms={len(search_terms)}",
+        flush=True,
+    )
+    if article_to_brands:
+        preview = ", ".join(list(article_to_brands)[:12])
+        print(f"[MoySklad] Article key preview: {preview}", flush=True)
+
+    if not article_to_brands or not warehouse_id:
+        print("[MoySklad] Lookup stopped: no article keys or warehouse id", flush=True)
+        return ()
+
+    products = _request_products_by_article_terms(token, search_terms, set(article_to_brands))
+    print(f"[MoySklad] Products matched by article: {len(products)}", flush=True)
+    if not products:
+        return ()
+
+    stock_by_product_id = _request_stock_by_warehouse(token, warehouse_id)
+    print(f"[MoySklad] Stock rows indexed: {len(stock_by_product_id)}", flush=True)
+    results: list[ProductStockMatch] = []
+    for product_id, product in products.items():
+        article = _extract_string(product, "article")
+        article_key = normalize_article(article)
+        brand = _extract_product_brand(product)
+        source_brands = article_to_brands.get(article_key, set())
+        results.append(
+            ProductStockMatch(
+                id=product_id,
+                name=_extract_string(product, "name"),
+                article=article,
+                brand=brand,
+                quantity=stock_by_product_id.get(product_id, 0.0),
+                cell="",
+                brand_matches_query=normalize_brand(brand) in source_brands,
+            )
+        )
+
+    print(f"[MoySklad] Final stock matches: {len(results)}", flush=True)
+    return tuple(sorted(results, key=lambda item: (item.brand.casefold(), item.article.casefold(), item.name.casefold())))
+
+
+def _request_products_by_article_terms(token: str, search_terms: set[str], article_keys: set[str]) -> dict[str, dict]:
+    products: dict[str, dict] = {}
+    article_terms = sorted({term for term in search_terms if term}, key=lambda value: (len(value), value.casefold()))
+    chunk_size = 30
+    for chunk_start in range(0, len(article_terms), chunk_size):
+        term_chunk = article_terms[chunk_start : chunk_start + chunk_size]
+        filter_value = ";".join(f"article={term}" for term in term_chunk)
+        offset = 0
+        while True:
+            query = urlencode({"limit": PAGE_LIMIT, "offset": offset, "filter": filter_value, "expand": "attributes.value"})
+            print(
+                f"[MoySklad] Product batch request: terms={len(term_chunk)}, offset={offset}, first={term_chunk[0]!r}",
+                flush=True,
+            )
+            payload = _open_json(_bearer_request(f"{PRODUCT_URL}?{query}", token))
+            rows = payload.get("rows")
+            if not isinstance(rows, list):
+                print("[MoySklad] Product batch returned invalid rows", flush=True)
+                break
+
+            matched_on_page = 0
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                article = _extract_string(row, "article")
+                if normalize_article(article) not in article_keys:
+                    continue
+                product_id = _extract_entity_id(row)
+                if product_id:
+                    products[product_id] = row
+                    matched_on_page += 1
+
+            print(
+                f"[MoySklad] Product batch response: terms={len(term_chunk)}, rows={len(rows)}, matched_on_page={matched_on_page}, total_matches={len(products)}",
+                flush=True,
+            )
+
+            meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+            size = meta.get("size")
+            limit = meta.get("limit", PAGE_LIMIT)
+            offset = meta.get("offset", offset) + limit
+            if not isinstance(size, int) or not isinstance(limit, int) or offset >= size:
+                break
+
+    return products
+
+
+def _request_stock_by_warehouse(token: str, warehouse_id: str) -> dict[str, float]:
+    query = urlencode({"stockType": "stock", "filter": f"storeId={warehouse_id}"})
+    try:
+        print(f"[MoySklad] Stock current request: warehouse_id={warehouse_id}", flush=True)
+        payload = _open_payload(_bearer_request(f"{STOCK_CURRENT_URL}?{query}", token))
+    except MoySkladAuthError as error:
+        print(
+            f"[MoySklad] Stock current failed, trying stock/all: warehouse_id={warehouse_id}, error={error.message}",
+            flush=True,
+        )
+        payload = _open_json(
+            _bearer_request(
+                f"{STOCK_ALL_URL}?{urlencode({'filter': f'store={WAREHOUSE_URL}/{quote(warehouse_id)};stockType=stock', 'limit': PAGE_LIMIT})}"
+            )
+        )
+
+    if isinstance(payload, list):
+        stock_rows = _extract_current_stock_rows(payload)
+        print(f"[MoySklad] Stock current response: rows={len(payload)}, indexed={len(stock_rows)}", flush=True)
+        return stock_rows
+    if isinstance(payload, dict):
+        rows = payload.get("rows")
+        if isinstance(rows, list):
+            stock_rows = _extract_stock_report_rows(rows)
+            print(f"[MoySklad] Stock report response: rows={len(rows)}, indexed={len(stock_rows)}", flush=True)
+            return stock_rows
+    print("[MoySklad] Stock response has no usable rows", flush=True)
+    return {}
+
+
+def _extract_current_stock_rows(rows: list) -> dict[str, float]:
+    stock_by_product_id: dict[str, float] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        product_id = _extract_string(row, "assortmentId") or _extract_string(row, "productId")
+        if not product_id:
+            continue
+        stock_by_product_id[product_id] = _extract_float(row, ("stock", "quantity", "freeStock"))
+    return stock_by_product_id
+
+
+def _extract_stock_report_rows(rows: list) -> dict[str, float]:
+    stock_by_product_id: dict[str, float] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        product_id = _extract_entity_id(row)
+        meta = row.get("meta")
+        if not product_id and isinstance(meta, dict):
+            product_id = _extract_id_from_href(_extract_string(meta, "href"))
+        if not product_id:
+            continue
+        stock_by_product_id[product_id] = _extract_float(row, ("stock", "quantity", "freeStock"))
+    return stock_by_product_id
+
+
 def _find_custom_entity_ids_in_entity_rows(token: str, entity_url: str, attribute_names: tuple[str, ...]) -> tuple[str, ...]:
     query = urlencode({"limit": 100, "offset": 0, "expand": "attributes.value"})
     try:
@@ -313,6 +507,56 @@ def _extract_warehouse(payload: dict) -> Warehouse:
     )
 
 
+def _extract_product_brand(payload: dict) -> str:
+    attributes = payload.get("attributes")
+    if not isinstance(attributes, list):
+        return ""
+
+    expected_names = {name.casefold() for name in BRAND_ATTRIBUTE_NAMES}
+    for attribute in attributes:
+        if not isinstance(attribute, dict):
+            continue
+        name = _extract_string(attribute, "name")
+        if name.casefold() not in expected_names:
+            continue
+        value = attribute.get("value")
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            named_value = _extract_named_value(value)
+            if named_value:
+                return named_value
+    return ""
+
+
+def _extract_entity_id(payload: dict) -> str:
+    entity_id = _extract_string(payload, "id")
+    if entity_id:
+        return entity_id
+
+    meta = payload.get("meta")
+    if isinstance(meta, dict):
+        return _extract_id_from_href(_extract_string(meta, "href"))
+    return ""
+
+
+def _extract_id_from_href(href: str) -> str:
+    return href.rstrip("/").rsplit("/", 1)[-1] if href else ""
+
+
+def _extract_float(payload: dict, keys: tuple[str, ...]) -> float:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value.replace(",", "."))
+            except ValueError:
+                continue
+    return 0.0
+
+
 def _extract_group_name(payload: dict) -> str:
     names: list[str] = []
 
@@ -385,7 +629,7 @@ def _extract_named_value(payload: dict) -> str:
     return ""
 
 
-def _open_json(request: urllib.request.Request) -> dict:
+def _open_payload(request: urllib.request.Request) -> Any:
     try:
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             raw_payload = response.read()
@@ -407,6 +651,11 @@ def _open_json(request: urllib.request.Request) -> dict:
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise MoySkladAuthError("МойСклад вернул некорректный ответ.") from error
 
+    return payload
+
+
+def _open_json(request: urllib.request.Request) -> dict:
+    payload = _open_payload(request)
     if not isinstance(payload, dict):
         raise MoySkladAuthError("МойСклад вернул некорректный ответ.")
     return payload
