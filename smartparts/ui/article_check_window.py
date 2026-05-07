@@ -1,7 +1,12 @@
+import json
+from json import JSONDecodeError
+from typing import Any
+
 from PySide6.QtCore import QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QLinearGradient, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -65,6 +70,8 @@ class ArticleCheckCanvas(QWidget):
         self._selected_mode = "exact"
         self._mode_buttons: dict[str, QPushButton] = {}
         self._section_buttons: dict[str, QPushButton] = {}
+        self._parsed_analog_rows: list[tuple[str, str, str, str]] = []
+        self._selected_brand = ""
         self.setObjectName("articleCheckCanvas")
         self.setStyleSheet(article_check_stylesheet())
 
@@ -302,9 +309,30 @@ class ArticleCheckCanvas(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
         layout.addWidget(self._mode_switcher())
+        self._brand_filter = self._brand_filter_panel()
+        layout.addWidget(self._brand_filter)
         self._table = self._results_table()
         layout.addWidget(self._table, 1)
         return page
+
+    def _brand_filter_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("brandFilterPanel")
+        layout = QHBoxLayout(panel)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
+
+        label = QLabel("Бренд")
+        label.setObjectName("fieldLabel")
+        layout.addWidget(label)
+
+        self._brand_filter_combo = QComboBox()
+        self._brand_filter_combo.setObjectName("brandFilterCombo")
+        self._brand_filter_combo.setCursor(Qt.PointingHandCursor)
+        self._brand_filter_combo.currentIndexChanged.connect(self._on_brand_filter_changed)
+        layout.addWidget(self._brand_filter_combo, 1)
+        panel.setVisible(False)
+        return panel
 
     def _mode_switcher(self) -> QFrame:
         switcher = QFrame()
@@ -365,8 +393,11 @@ class ArticleCheckCanvas(QWidget):
         QDesktopServices.openUrl(QUrl(self.ARTICLE_SEARCH_URL))
 
     def _submit_page_text(self) -> None:
+        self._parsed_analog_rows = self._parse_article_page(self._page_text.toPlainText())
+        self._selected_brand = ""
+        self._populate_brand_filter()
+        self._set_mode("analogs")
         self._show_section("results")
-        self._render_table()
 
     def _set_mode(self, mode: str) -> None:
         self._selected_mode = mode
@@ -374,6 +405,7 @@ class ArticleCheckCanvas(QWidget):
             button.setObjectName("modeToggleActive" if key == mode else "modeToggleInactive")
             button.style().unpolish(button)
             button.style().polish(button)
+        self._refresh_brand_filter_visibility()
         self._render_table()
 
     def _render_table(self) -> None:
@@ -382,7 +414,12 @@ class ArticleCheckCanvas(QWidget):
 
         config = self._MODES[self._selected_mode]
         headers = config["headers"]
-        rows = self._filtered_rows(config["rows"])
+        if self._selected_mode == "analogs" and self._parsed_analog_rows:
+            headers = ("Тип", "Бренд", "Артикул", "Номер для поиска")
+            rows = self._filtered_analog_rows()
+        else:
+            rows = self._filtered_rows(config["rows"])
+        self._refresh_brand_filter_visibility()
         self._table.clear()
         self._table.setColumnCount(len(headers))
         self._table.setHorizontalHeaderLabels(headers)
@@ -400,6 +437,40 @@ class ArticleCheckCanvas(QWidget):
                     item.setTextAlignment(Qt.AlignCenter)
                 self._table.setItem(row_index, column_index, item)
 
+    def _populate_brand_filter(self) -> None:
+        if not hasattr(self, "_brand_filter_combo"):
+            return
+
+        brands = sorted(
+            {row[1] for row in self._parsed_analog_rows if row[1]},
+            key=str.casefold,
+        )
+        self._brand_filter_combo.blockSignals(True)
+        self._brand_filter_combo.clear()
+        self._brand_filter_combo.addItem("Все бренды", "")
+        for brand in brands:
+            self._brand_filter_combo.addItem(brand, brand)
+        self._brand_filter_combo.setCurrentIndex(0)
+        self._brand_filter_combo.blockSignals(False)
+        self._refresh_brand_filter_visibility()
+
+    def _on_brand_filter_changed(self, *_args: object) -> None:
+        if not hasattr(self, "_brand_filter_combo"):
+            return
+        self._selected_brand = self._brand_filter_combo.currentData() or ""
+        self._render_table()
+
+    def _refresh_brand_filter_visibility(self) -> None:
+        if not hasattr(self, "_brand_filter"):
+            return
+        self._brand_filter.setVisible(self._selected_mode == "analogs" and bool(self._parsed_analog_rows))
+
+    def _filtered_analog_rows(self) -> list[tuple[str, str, str, str]]:
+        rows = self._parsed_analog_rows
+        if self._selected_brand:
+            rows = [row for row in rows if row[1] == self._selected_brand]
+        return sorted(rows, key=lambda row: (row[1].casefold(), row[2].casefold(), row[3].casefold()))
+
     def _filtered_rows(self, rows: tuple[tuple[str, ...], ...]) -> list[tuple[str, ...]]:
         pasted_text = self._page_text.toPlainText().strip().casefold() if hasattr(self, "_page_text") else ""
         tokens = [token for token in pasted_text.replace("-", " ").split() if len(token) >= 4]
@@ -412,6 +483,53 @@ class ArticleCheckCanvas(QWidget):
             if any(token in haystack for token in tokens[:50]):
                 filtered.append(row)
         return filtered or list(rows)
+
+    def _parse_article_page(self, page_text: str) -> list[tuple[str, str, str, str]]:
+        payload = self._extract_json_payload(page_text)
+        if not isinstance(payload, dict):
+            return []
+
+        rows: list[tuple[str, str, str, str]] = []
+        requested = self._article_row(payload, "Запрос", "outer_number")
+        if requested:
+            rows.append(requested)
+
+        crosses = payload.get("crosses")
+        if isinstance(crosses, list):
+            for item in crosses:
+                if not isinstance(item, dict):
+                    continue
+                analog = self._article_row(item, "Аналог", "numberFix")
+                if analog:
+                    rows.append(analog)
+
+        return rows
+
+    def _article_row(self, item: dict[str, Any], label: str, normalized_key: str) -> tuple[str, str, str, str] | None:
+        brand = self._string_value(item.get("brand"))
+        number = self._string_value(item.get("number"))
+        normalized_number = self._string_value(item.get(normalized_key))
+        if not brand and not number and not normalized_number:
+            return None
+        return (label, brand, number, normalized_number)
+
+    def _string_value(self, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    def _extract_json_payload(self, page_text: str) -> dict[str, Any] | None:
+        decoder = json.JSONDecoder()
+        for index, character in enumerate(page_text):
+            if character != "{":
+                continue
+            try:
+                payload, _ = decoder.raw_decode(page_text[index:])
+            except JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
+        return None
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt API naming
         painter = QPainter(self)

@@ -889,6 +889,22 @@ def article_check_stylesheet() -> str:
         background: #10202A;
         border-color: #263948;
     }}
+    #brandFilterPanel {{
+        background: #101B24;
+        border: 1px solid #263948;
+        border-radius: 8px;
+    }}
+    #brandFilterCombo {{
+        color: #DDEAF2;
+        background: #0B1219;
+        border: 1px solid #263948;
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 13px;
+    }}
+    #brandFilterCombo:hover {{
+        border-color: rgba(45, 226, 230, 0.55);
+    }}
     #articleResultsTable {{
         color: #DDEAF2;
         background: #0B1219;
